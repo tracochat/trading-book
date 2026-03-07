@@ -54,8 +54,7 @@ const navigation = [
   {
     title: "Performance",
     items: [
-      { title: "Mark-to-Market", href: "/dashboard/mtm", icon: TrendingUp },
-      { title: "Realized & Unrealized P&L", href: "/dashboard/pnl", icon: BarChart3 },
+      { title: "Performance Summary", href: "/dashboard/performance", icon: TrendingUp },
     ],
   },
   {
