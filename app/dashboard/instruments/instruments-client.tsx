@@ -51,7 +51,8 @@ import { Switch } from "@/components/ui/switch"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { toast } from "sonner"
 import type { Instrument, AssetCategory } from "@/lib/types"
-import { createInstrument, updateInstrument, deleteInstrument, bulkImportInstruments, parseInstrumentFile } from "./actions"
+import { createInstrument, updateInstrument, deleteInstrument, bulkImportInstruments } from "./actions"
+import { parseInstrumentFile } from "@/lib/instrument-parser"
 
 const assetCategories: AssetCategory[] = ['Stocks', 'Equity and Index Options', 'Bonds', 'Cash', 'Futures', 'Forex', 'Funds', 'Warrants', 'CFD', 'Other']
 const currencies = ['USD', 'SGD', 'HKD', 'EUR', 'GBP', 'JPY', 'CNY', 'AUD', 'CAD']

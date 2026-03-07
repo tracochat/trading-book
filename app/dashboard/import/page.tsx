@@ -6,10 +6,13 @@ async function getAccounts() {
   const { data, error } = await supabase
     .from('accounts')
     .select('id, account_id, account_name, platform')
-    .eq('is_active', true)
+    .eq('status', 'active')
     .order('account_name')
   
-  if (error) return []
+  if (error) {
+    console.error('Error fetching accounts:', error)
+    return []
+  }
   return data || []
 }
 
