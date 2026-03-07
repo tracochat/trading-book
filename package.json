@@ -11,8 +11,6 @@
   },
   "dependencies": {
     "pg": "^8.11.0",
-    "drizzle-orm": "^0.55.0",
-    "drizzle-kit": "^0.55.0",
     "@hookform/resolvers": "^3.9.1",
     "@vercel/analytics": "1.6.1",
     "@radix-ui/react-accordion": "1.2.12",
