@@ -1,8 +1,9 @@
 "use server"
 
-import { createClient } from "@/lib/supabase/server"
 import { revalidatePath } from "next/cache"
 import type { CashTransactionType } from "@/lib/types"
+import { db } from "@/lib/db"
+import { cashTransactions as cashTable } from "@/schema/schema"
 
 interface CashTransactionFormData {
   account_id: string
@@ -14,20 +15,18 @@ interface CashTransactionFormData {
 }
 
 export async function createCashTransaction(data: CashTransactionFormData) {
-  const supabase = await createClient()
-  
-  const { error } = await supabase.from('cash_transactions').insert({
-    account_id: data.account_id,
-    transaction_date: data.transaction_date,
-    transaction_type: data.transaction_type,
-    amount: data.amount,
-    currency: data.currency,
-    description: data.description || null,
-  })
-
-  if (error) {
+  try {
+    await db.insert(cashTable).values({
+      account_id: data.account_id,
+      transaction_date: data.transaction_date,
+      transaction_type: data.transaction_type,
+      amount: data.amount,
+      currency: data.currency,
+      description: data.description || null,
+    })
+  } catch (error) {
     console.error('Error creating cash transaction:', error)
-    return { error: error.message }
+    return { error: error instanceof Error ? error.message : String(error) }
   }
 
   revalidatePath('/dashboard/deposits')
@@ -36,24 +35,23 @@ export async function createCashTransaction(data: CashTransactionFormData) {
 }
 
 export async function updateCashTransaction(id: string, data: CashTransactionFormData) {
-  const supabase = await createClient()
-  
-  const { error } = await supabase
-    .from('cash_transactions')
-    .update({
-      account_id: data.account_id,
-      transaction_date: data.transaction_date,
-      transaction_type: data.transaction_type,
-      amount: data.amount,
-      currency: data.currency,
-      description: data.description || null,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', id)
-
-  if (error) {
+  try {
+    await db
+      .update(cashTable)
+      .set({
+        account_id: data.account_id,
+        transaction_date: data.transaction_date,
+        transaction_type: data.transaction_type,
+        amount: data.amount,
+        currency: data.currency,
+        description: data.description || null,
+        updated_at: new Date(),
+      })
+      .where(cashTable.id.eq(id))
+      
+  } catch (error) {
     console.error('Error updating cash transaction:', error)
-    return { error: error.message }
+    return { error: error instanceof Error ? error.message : String(error) }
   }
 
   revalidatePath('/dashboard/deposits')
@@ -62,16 +60,11 @@ export async function updateCashTransaction(id: string, data: CashTransactionFor
 }
 
 export async function deleteCashTransaction(id: string) {
-  const supabase = await createClient()
-  
-  const { error } = await supabase
-    .from('cash_transactions')
-    .delete()
-    .eq('id', id)
-
-  if (error) {
+  try {
+    await db.delete(cashTable).where(cashTable.id.eq(id))
+  } catch (error) {
     console.error('Error deleting cash transaction:', error)
-    return { error: error.message }
+    return { error: error instanceof Error ? error.message : String(error) }
   }
 
   revalidatePath('/dashboard/deposits')

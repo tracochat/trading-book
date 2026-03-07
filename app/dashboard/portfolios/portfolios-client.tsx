@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { Plus, MoreHorizontal, Pencil, Trash2, Briefcase, ArrowRight } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -55,7 +55,11 @@ interface PortfoliosClientProps {
 
 export function PortfoliosClient({ initialPortfolios, portfolioStats, accounts }: PortfoliosClientProps) {
   const router = useRouter()
-  const [portfolios] = useState<Portfolio[]>(initialPortfolios)
+  const [portfolios, setPortfolios] = useState<Portfolio[]>(initialPortfolios)
+  // sync portfolios when server props update
+  useEffect(() => {
+    setPortfolios(initialPortfolios)
+  }, [initialPortfolios])
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
   const [editingPortfolio, setEditingPortfolio] = useState<Portfolio | null>(null)

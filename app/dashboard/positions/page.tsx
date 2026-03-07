@@ -1,4 +1,5 @@
-import { createClient } from "@/lib/supabase/server"
+import { db, sql } from "@/lib/db"
+import { openPositions, instruments, accounts, portfolios } from "@/schema/schema"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import {
   Table,
@@ -8,27 +9,29 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { Badge } from "@/components/ui/badge"
 import { Briefcase } from "lucide-react"
 
 async function getOpenPositions() {
-  const supabase = await createClient()
-  const { data, error } = await supabase
-    .from('open_positions')
-    .select(`
-      *,
-      instrument:instruments(symbol, description, asset_class),
-      account:accounts(account_name, platform),
-      portfolio:portfolios(name)
-    `)
-    .order('as_of_date', { ascending: false })
-  
-  if (error) {
-    console.error('Error fetching positions:', error)
-    return []
-  }
-  
-  return data || []
+  const rows = await db
+    .select({
+      position: openPositions,
+      instrument: instruments,
+      account: accounts,
+      portfolio: portfolios,
+    })
+    .from(openPositions)
+    .leftJoin(instruments, sql`${instruments.id} = ${openPositions.instrument_id}`)
+    .leftJoin(accounts, sql`${accounts.id} = ${openPositions.account_id}`)
+    .leftJoin(portfolios, sql`${portfolios.id} = ${openPositions.portfolio_id}`)
+    .orderBy(openPositions.as_of_date, 'desc')
+
+  // flatten joined results
+  return rows.map(r => ({
+    ...r.position,
+    instrument: r.instrument,
+    account: r.account,
+    portfolio: r.portfolio,
+  }))
 }
 
 function formatCurrency(amount: number | null, currency: string) {

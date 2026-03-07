@@ -1,4 +1,5 @@
-import { createClient } from "@/lib/supabase/server"
+import { db, sql } from "@/lib/db"
+import { cashTransactions, accounts, forexBalances } from "@/schema/schema"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import {
   Table,
@@ -12,36 +13,24 @@ import { CreditCard } from "lucide-react"
 import { format } from "date-fns"
 
 async function getCashTransactions() {
-  const supabase = await createClient()
-  const { data, error } = await supabase
-    .from('cash_transactions')
-    .select(`
-      *,
-      account:accounts(account_name, platform, base_currency)
-    `)
-    .order('transaction_date', { ascending: false })
+  const rows = await db
+    .select({ tx: cashTransactions, account: accounts })
+    .from(cashTransactions)
+    .leftJoin(accounts, sql`${accounts.id} = ${cashTransactions.account_id}`)
+    .orderBy(cashTransactions.transaction_date, 'desc')
     .limit(100)
-  
-  if (error) {
-    console.error('Error fetching cash transactions:', error)
-    return []
-  }
-  
-  return data || []
+
+  return rows.map(r => ({ ...r.tx, account: r.account }))
 }
 
 async function getForexBalances() {
-  const supabase = await createClient()
-  const { data, error } = await supabase
-    .from('forex_balances')
-    .select(`
-      *,
-      account:accounts(account_name)
-    `)
-    .order('as_of_date', { ascending: false })
-  
-  if (error) return []
-  return data || []
+  const rows = await db
+    .select({ bal: forexBalances, account: accounts })
+    .from(forexBalances)
+    .leftJoin(accounts, sql`${accounts.id} = ${forexBalances.account_id}`)
+    .orderBy(forexBalances.as_of_date, 'desc')
+
+  return rows.map(r => ({ ...r.bal, account: r.account }))
 }
 
 function formatCurrency(amount: number, currency: string) {

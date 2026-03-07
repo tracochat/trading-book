@@ -1,6 +1,7 @@
 "use server"
 
-import { createClient } from "@/lib/supabase/server"
+import { db, sql } from "@/lib/db"
+import { performanceSummary, accounts } from "@/schema/schema"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import {
   Table,
@@ -14,23 +15,17 @@ import { TrendingUp, TrendingDown, Activity, BarChart3 } from "lucide-react"
 import { format } from "date-fns"
 
 async function getPerformanceSummary() {
-  const supabase = await createClient()
-  const { data, error } = await supabase
-    .from('performance_summary')
-    .select(`
-      *,
-      account:accounts(account_id, account_name),
-      portfolio:portfolios(name)
-    `)
-    .order('period_end', { ascending: false })
+  const rows = await db
+    .select({
+      perf: performanceSummary,
+      account: accounts,
+    })
+    .from(performanceSummary)
+    .leftJoin(accounts, sql`${accounts.id} = ${performanceSummary.account_id}`)
+    .orderBy(performanceSummary.period_end, 'desc')
     .limit(100)
-  
-  if (error) {
-    console.error('Error fetching performance:', error)
-    return []
-  }
-  
-  return data || []
+
+  return rows.map(r => ({ ...r.perf, account: r.account }))
 }
 
 function formatCurrency(amount: number, currency: string) {

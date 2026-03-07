@@ -1,7 +1,8 @@
 "use server"
 
-import { createClient } from "@/lib/supabase/server"
 import { revalidatePath } from "next/cache"
+import { db, sql } from "@/lib/db"
+import { portfolios as portfoliosTable, trades as tradesTable } from "@/schema/schema"
 
 interface PortfolioFormData {
   name: string
@@ -13,20 +14,18 @@ interface PortfolioFormData {
 }
 
 export async function createPortfolio(data: PortfolioFormData) {
-  const supabase = await createClient()
-  
-  const { error } = await supabase.from('portfolios').insert({
-    name: data.name,
-    description: data.description || null,
-    account_id: data.account_id || null,
-    base_currency: data.base_currency || 'USD',
-    strategy: data.strategy || null,
-    status: data.status || 'active',
-  })
-
-  if (error) {
+  try {
+    await db.insert(portfoliosTable).values({
+      name: data.name,
+      description: data.description || null,
+      account_id: data.account_id || null,
+      base_currency: data.base_currency || 'USD',
+      strategy: data.strategy || null,
+      status: data.status || 'active',
+    })
+  } catch (error) {
     console.error('Error creating portfolio:', error)
-    return { error: error.message }
+    return { error: error instanceof Error ? error.message : String(error) }
   }
 
   revalidatePath('/dashboard/portfolios')
@@ -34,24 +33,22 @@ export async function createPortfolio(data: PortfolioFormData) {
 }
 
 export async function updatePortfolio(id: string, data: PortfolioFormData) {
-  const supabase = await createClient()
-  
-  const { error } = await supabase
-    .from('portfolios')
-    .update({
-      name: data.name,
-      description: data.description || null,
-      account_id: data.account_id || null,
-      base_currency: data.base_currency || 'USD',
-      strategy: data.strategy || null,
-      status: data.status || 'active',
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', id)
-
-  if (error) {
+  try {
+    await db
+      .update(portfoliosTable)
+      .set({
+        name: data.name,
+        description: data.description || null,
+        account_id: data.account_id || null,
+        base_currency: data.base_currency || 'USD',
+        strategy: data.strategy || null,
+        status: data.status || 'active',
+        updated_at: new Date(),
+      })
+      .where(sql`${portfoliosTable.id} = ${id}`)
+  } catch (error) {
     console.error('Error updating portfolio:', error)
-    return { error: error.message }
+    return { error: error instanceof Error ? error.message : String(error) }
   }
 
   revalidatePath('/dashboard/portfolios')
@@ -59,23 +56,19 @@ export async function updatePortfolio(id: string, data: PortfolioFormData) {
 }
 
 export async function deletePortfolio(id: string) {
-  const supabase = await createClient()
-  
-  // First unassign any trades from this portfolio
-  await supabase
-    .from('trades')
-    .update({ portfolio_id: null })
-    .eq('portfolio_id', id)
-  
-  const { error } = await supabase
-    .from('portfolios')
-    .delete()
-    .eq('id', id)
-
-  if (error) {
+  try {
+    // unassign trades
+    await db
+      .update(tradesTable)
+      .set({ portfolio_id: null })
+      .where(sql`${tradesTable.portfolio_id} = ${id}`)
+    await db.delete(portfoliosTable).where(sql`${portfoliosTable.id} = ${id}`)
+  } catch (error) {
     console.error('Error deleting portfolio:', error)
-    return { error: error.message }
+    return { error: error instanceof Error ? error.message : String(error) }
   }
+
+
 
   revalidatePath('/dashboard/portfolios')
   revalidatePath('/dashboard/trades')
@@ -83,15 +76,18 @@ export async function deletePortfolio(id: string) {
 }
 
 export async function assignTradesToPortfolio(tradeIds: string[], portfolioId: string | null) {
-  const supabase = await createClient()
-  
-  const { error } = await supabase
-    .from('trades')
-    .update({ 
-      portfolio_id: portfolioId,
-      updated_at: new Date().toISOString(),
-    })
-    .in('id', tradeIds)
+  try {
+    await db
+      .update(tradesTable)
+      .set({ 
+        portfolio_id: portfolioId,
+        updated_at: new Date(),
+      })
+      .where(tradesTable.id.in(tradeIds))
+  } catch (error) {
+    console.error('Error assigning trades:', error)
+    return { error: error instanceof Error ? error.message : String(error) }
+  }
 
   if (error) {
     console.error('Error assigning trades:', error)

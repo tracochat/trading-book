@@ -1,34 +1,34 @@
-import { createClient } from "@/lib/supabase/server"
+import { db, sql } from "@/lib/db"
 import { ImportClient } from "./import-client"
+import { accounts, activityImports } from "@/schema/schema"
 
 async function getAccounts() {
-  const supabase = await createClient()
-  const { data, error } = await supabase
-    .from('accounts')
-    .select('id, account_id, account_name, platform')
-    .eq('status', 'active')
-    .order('account_name')
-  
-  if (error) {
-    console.error('Error fetching accounts:', error)
-    return []
-  }
-  return data || []
+  const rows = await db
+    .select({
+      id: accounts.id,
+      account_id: accounts.account_id,
+      account_name: accounts.account_name,
+      platform: accounts.platform,
+    })
+    .from(accounts)
+    .where(sql`${accounts.status} = 'active'`)
+    .orderBy(accounts.account_name)
+
+  return rows
 }
 
 async function getRecentImports() {
-  const supabase = await createClient()
-  const { data, error } = await supabase
-    .from('activity_imports')
-    .select(`
-      *,
-      account:accounts(account_id, account_name, platform)
-    `)
-    .order('created_at', { ascending: false })
+  const rows = await db
+    .select({
+      imp: activityImports,
+      account: { account_name: accounts.account_name, platform: accounts.platform },
+    })
+    .from(activityImports)
+    .leftJoin(accounts, sql`${accounts.id} = ${activityImports.account_id}`)
+    .orderBy(activityImports.imported_at, 'desc')
     .limit(20)
-  
-  if (error) return []
-  return data || []
+
+  return rows.map(r => ({ ...r.imp, account: r.account }))
 }
 
 export default async function ImportPage() {

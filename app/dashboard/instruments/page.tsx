@@ -1,35 +1,26 @@
-import { createClient } from "@/lib/supabase/server"
 import { InstrumentsClient } from "./instruments-client"
+import { db } from "@/lib/db"
+import { instruments, trades } from "@/schema/schema"
 
 async function getInstruments() {
-  const supabase = await createClient()
-  const { data, error } = await supabase
-    .from('instruments')
-    .select('*')
-    .order('symbol', { ascending: true })
-  
-  if (error) {
+  try {
+    return await db.select().from(instruments).orderBy(instruments.symbol)
+  } catch (error) {
     console.error('Error fetching instruments:', error)
     return []
   }
-  
-  return data || []
 }
 
 async function getTradedInstrumentIds() {
-  const supabase = await createClient()
-  const { data, error } = await supabase
-    .from('trades')
-    .select('instrument_id')
-  
-  if (error) {
+  try {
+    const rows = await db
+      .select({ instrument_id: trades.instrument_id })
+      .from(trades)
+    return [...new Set(rows.map(r => r.instrument_id).filter((id): id is string => id !== null))]
+  } catch (error) {
     console.error('Error fetching traded instruments:', error)
     return []
   }
-  
-  // Get unique instrument IDs (filter out nulls)
-  const uniqueIds = [...new Set(data?.map(t => t.instrument_id).filter((id): id is string => id !== null) || [])]
-  return uniqueIds
 }
 
 export default async function InstrumentsPage() {

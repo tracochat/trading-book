@@ -1,4 +1,5 @@
-import { createClient } from "@/lib/supabase/server"
+import { db, sql } from "@/lib/db"
+import { interestAccruals, accounts } from "@/schema/schema"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import {
   Table,
@@ -13,22 +14,14 @@ import { Percent } from "lucide-react"
 import { format } from "date-fns"
 
 async function getInterestAccruals() {
-  const supabase = await createClient()
-  const { data, error } = await supabase
-    .from('interest_accruals')
-    .select(`
-      *,
-      account:accounts(account_name, platform)
-    `)
-    .order('accrual_date', { ascending: false })
+  const rows = await db
+    .select({ accrual: interestAccruals, account: accounts })
+    .from(interestAccruals)
+    .leftJoin(accounts, sql`${accounts.id} = ${interestAccruals.account_id}`)
+    .orderBy(interestAccruals.accrual_date, 'desc')
     .limit(200)
-  
-  if (error) {
-    console.error('Error fetching interest accruals:', error)
-    return []
-  }
-  
-  return data || []
+
+  return rows.map(r => ({ ...r.accrual, account: r.account }))
 }
 
 export default async function InterestAccrualsPage() {

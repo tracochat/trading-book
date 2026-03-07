@@ -1,23 +1,22 @@
 "use server"
 
-import { createClient } from "@/lib/supabase/server"
 import { revalidatePath } from "next/cache"
 import type { AccountFormData } from "@/lib/types"
+import { db } from "@/lib/db"
+import { accounts as accountsTable } from "@/schema/schema"
 
 export async function createAccount(data: AccountFormData) {
-  const supabase = await createClient()
-  
-  const { error } = await supabase.from('accounts').insert({
-    account_id: data.account_id,
-    account_name: data.account_name,
-    platform: data.platform,
-    account_type: data.account_type || null,
-    base_currency: data.base_currency,
-    is_active: data.is_active,
-  })
-
-  if (error) {
-    throw new Error(error.message)
+  try {
+    await db.insert(accountsTable).values({
+      account_id: data.account_id,
+      account_name: data.account_name,
+      platform: data.platform,
+      account_type: data.account_type || null,
+      base_currency: data.base_currency,
+      is_active: data.is_active,
+    })
+  } catch (err) {
+    throw err
   }
 
   revalidatePath('/dashboard/accounts')
@@ -25,23 +24,21 @@ export async function createAccount(data: AccountFormData) {
 }
 
 export async function updateAccount(id: string, data: Partial<AccountFormData>) {
-  const supabase = await createClient()
-  
-  const { error } = await supabase
-    .from('accounts')
-    .update({
-      account_id: data.account_id,
-      account_name: data.account_name,
-      platform: data.platform,
-      account_type: data.account_type || null,
-      base_currency: data.base_currency,
-      is_active: data.is_active,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', id)
-
-  if (error) {
-    throw new Error(error.message)
+  try {
+    await db
+      .update(accountsTable)
+      .set({
+        account_id: data.account_id,
+        account_name: data.account_name,
+        platform: data.platform,
+        account_type: data.account_type || null,
+        base_currency: data.base_currency,
+        is_active: data.is_active,
+        updated_at: new Date(),
+      })
+      .where(accountsTable.id.eq(id))
+  } catch (err) {
+    throw err
   }
 
   revalidatePath('/dashboard/accounts')
@@ -49,15 +46,10 @@ export async function updateAccount(id: string, data: Partial<AccountFormData>) 
 }
 
 export async function deleteAccount(id: string) {
-  const supabase = await createClient()
-  
-  const { error } = await supabase
-    .from('accounts')
-    .delete()
-    .eq('id', id)
-
-  if (error) {
-    throw new Error(error.message)
+  try {
+    await db.delete(accountsTable).where(accountsTable.id.eq(id))
+  } catch (err) {
+    throw err
   }
 
   revalidatePath('/dashboard/accounts')
@@ -65,16 +57,5 @@ export async function deleteAccount(id: string) {
 }
 
 export async function getAccounts() {
-  const supabase = await createClient()
-  
-  const { data, error } = await supabase
-    .from('accounts')
-    .select('*')
-    .order('created_at', { ascending: false })
-
-  if (error) {
-    throw new Error(error.message)
-  }
-
-  return data
+  return await db.select().from(accountsTable).orderBy(accountsTable.created_at, 'desc')
 }

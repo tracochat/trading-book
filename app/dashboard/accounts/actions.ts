@@ -1,8 +1,10 @@
 "use server"
 
-import { createClient } from "@/lib/supabase/server"
 import { revalidatePath } from "next/cache"
 import type { Platform } from "@/lib/types"
+import { db } from "@/lib/db"
+import { sql } from "drizzle-orm"
+import { accounts as accountsTable } from "@/schema/schema"
 
 interface AccountFormData {
   account_id: string
@@ -14,20 +16,18 @@ interface AccountFormData {
 }
 
 export async function createAccount(data: AccountFormData) {
-  const supabase = await createClient()
-  
-  const { error } = await supabase.from('accounts').insert({
-    account_id: data.account_id,
-    account_name: data.account_name,
-    platform: data.platform,
-    account_type: data.account_type || null,
-    base_currency: data.base_currency,
-    status: data.status || 'active',
-  })
-
-  if (error) {
+  try {
+    await db.insert(accountsTable).values({
+      account_id: data.account_id,
+      account_name: data.account_name,
+      platform: data.platform,
+      account_type: data.account_type || null,
+      base_currency: data.base_currency,
+      status: data.status || 'active',
+    })
+  } catch (error) {
     console.error('Error creating account:', error)
-    return { error: error.message }
+    return { error: error instanceof Error ? error.message : String(error) }
   }
 
   revalidatePath('/dashboard/accounts')
@@ -35,24 +35,22 @@ export async function createAccount(data: AccountFormData) {
 }
 
 export async function updateAccount(id: string, data: AccountFormData) {
-  const supabase = await createClient()
-  
-  const { error } = await supabase
-    .from('accounts')
-    .update({
-      account_id: data.account_id,
-      account_name: data.account_name,
-      platform: data.platform,
-      account_type: data.account_type || null,
-      base_currency: data.base_currency,
-      status: data.status || 'active',
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', id)
-
-  if (error) {
+  try {
+    await db
+      .update(accountsTable)
+      .set({
+        account_id: data.account_id,
+        account_name: data.account_name,
+        platform: data.platform,
+        account_type: data.account_type || null,
+        base_currency: data.base_currency,
+        status: data.status || 'active',
+        updated_at: new Date(),
+      })
+      .where(accountsTable.id.eq(id))
+  } catch (error) {
     console.error('Error updating account:', error)
-    return { error: error.message }
+    return { error: error instanceof Error ? error.message : String(error) }
   }
 
   revalidatePath('/dashboard/accounts')
@@ -60,16 +58,14 @@ export async function updateAccount(id: string, data: AccountFormData) {
 }
 
 export async function deleteAccount(id: string) {
-  const supabase = await createClient()
-  
-  const { error } = await supabase
-    .from('accounts')
-    .delete()
-    .eq('id', id)
-
-  if (error) {
+  try {
+    // fall back to raw SQL expression since helpers aren't available in this environment
+    // (the uuid comparison caused errors previously)
+    await db.delete(accountsTable)
+      .where(sql`${accountsTable.id} = ${id}`)
+  } catch (error) {
     console.error('Error deleting account:', error)
-    return { error: error.message }
+    return { error: error instanceof Error ? error.message : String(error) }
   }
 
   revalidatePath('/dashboard/accounts')

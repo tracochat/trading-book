@@ -1,19 +1,17 @@
-import { createClient } from "@/lib/supabase/server"
 import { AccountsClient } from "./accounts-client"
+import { db } from "@/lib/db"
+import { accounts as accountsTable } from "@/schema/schema"
 
 async function getAccounts() {
-  const supabase = await createClient()
-  const { data, error } = await supabase
-    .from('accounts')
-    .select('*')
-    .order('created_at', { ascending: false })
-  
-  if (error) {
+  try {
+    return await db
+      .select()
+      .from(accountsTable)
+      .orderBy(accountsTable.created_at, 'desc')
+  } catch (error) {
     console.error('Error fetching accounts:', error)
     return []
   }
-  
-  return data || []
 }
 
 export default async function AccountsPage() {

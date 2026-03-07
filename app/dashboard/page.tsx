@@ -1,4 +1,3 @@
-import { createClient } from "@/lib/supabase/server"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { 
   TrendingUp, 
@@ -9,22 +8,32 @@ import {
   Building2,
 } from "lucide-react"
 import Link from "next/link"
+import { db, sql } from "@/lib/db"
+import { accounts as accountsTable, trades as tradesTable, openPositions, navSnapshots } from "@/schema/schema"
 
 async function getDashboardStats() {
-  const supabase = await createClient()
-  
-  const [accountsRes, tradesRes, positionsRes, navRes] = await Promise.all([
-    supabase.from('accounts').select('*', { count: 'exact', head: true }),
-    supabase.from('trades').select('*', { count: 'exact', head: true }),
-    supabase.from('open_positions').select('*', { count: 'exact', head: true }),
-    supabase.from('nav_snapshots').select('total_nav, currency').order('as_of_date', { ascending: false }).limit(1),
-  ])
+  try {
+    const [accountCountRes, tradeCountRes, positionCountRes, latestNavRows] = await Promise.all([
+      db.select({ count: sql`count(${accountsTable.id})`.as('count') })
+        .from(accountsTable)
+        .where(sql`${accountsTable.status} = 'active'`),
+      db.select({ count: sql`count(${tradesTable.id})`.as('count') }).from(tradesTable),
+      db.select({ count: sql`count(${openPositions.id})`.as('count') }).from(openPositions),
+      db.select({ total_nav: navSnapshots.total_nav, currency: navSnapshots.currency })
+        .from(navSnapshots)
+        .orderBy(navSnapshots.as_of_date, 'desc')
+        .limit(1),
+    ])
 
-  return {
-    accountCount: accountsRes.count || 0,
-    tradeCount: tradesRes.count || 0,
-    positionCount: positionsRes.count || 0,
-    latestNav: navRes.data?.[0] || null,
+    return {
+      accountCount: accountCountRes[0]?.count || 0,
+      tradeCount: tradeCountRes[0]?.count || 0,
+      positionCount: positionCountRes[0]?.count || 0,
+      latestNav: latestNavRows[0] || null,
+    }
+  } catch (error) {
+    console.error('Error loading dashboard stats', error)
+    return { accountCount: 0, tradeCount: 0, positionCount: 0, latestNav: null }
   }
 }
 

@@ -3,7 +3,7 @@
 ## Phase 1: Foundation & Core Infrastructure
 
 ### Task 1.1: Database Setup
-- [ ] Create Supabase database schema
+- [ ] Create Drizzle ORM database schema
 - [ ] Set up Row Level Security policies
 - [ ] Create indexes for performance
 - [ ] Seed trade codes reference data

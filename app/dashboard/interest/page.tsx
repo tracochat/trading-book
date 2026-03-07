@@ -1,6 +1,7 @@
 "use server"
 
-import { createClient } from "@/lib/supabase/server"
+import { db, sql } from "@/lib/db"
+import { interest, accounts } from "@/schema/schema"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import {
   Table,
@@ -14,22 +15,14 @@ import { Percent, TrendingUp, TrendingDown } from "lucide-react"
 import { format } from "date-fns"
 
 async function getInterest() {
-  const supabase = await createClient()
-  const { data, error } = await supabase
-    .from('interest')
-    .select(`
-      *,
-      account:accounts(account_id, account_name)
-    `)
-    .order('date', { ascending: false })
+  const rows = await db
+    .select({ item: interest, account: accounts })
+    .from(interest)
+    .leftJoin(accounts, sql`${accounts.id} = ${interest.account_id}`)
+    .orderBy(interest.interest_date, 'desc')
     .limit(200)
-  
-  if (error) {
-    console.error('Error fetching interest:', error)
-    return []
-  }
-  
-  return data || []
+
+  return rows.map(r => ({ ...r.item, account: r.account }))
 }
 
 function formatCurrency(amount: number, currency: string) {

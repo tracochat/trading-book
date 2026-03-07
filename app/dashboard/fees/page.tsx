@@ -1,6 +1,7 @@
 "use server"
 
-import { createClient } from "@/lib/supabase/server"
+import { db, sql } from "@/lib/db"
+import { transactionFees, accounts } from "@/schema/schema"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import {
   Table,
@@ -14,22 +15,14 @@ import { Receipt, DollarSign, Percent } from "lucide-react"
 import { format } from "date-fns"
 
 async function getTransactionFees() {
-  const supabase = await createClient()
-  const { data, error } = await supabase
-    .from('transaction_fees')
-    .select(`
-      *,
-      account:accounts(account_id, account_name)
-    `)
-    .order('date', { ascending: false })
+  const rows = await db
+    .select({ fee: transactionFees, account: accounts })
+    .from(transactionFees)
+    .leftJoin(accounts, sql`${accounts.id} = ${transactionFees.account_id}`)
+    .orderBy(transactionFees.fee_date, 'desc')
     .limit(200)
-  
-  if (error) {
-    console.error('Error fetching fees:', error)
-    return []
-  }
-  
-  return data || []
+
+  return rows.map(r => ({ ...r.fee, account: r.account }))
 }
 
 function formatCurrency(amount: number, currency: string) {

@@ -409,7 +409,7 @@ CREATE TABLE trade_codes (
 - **Frontend**: Next.js 16, React 19, TypeScript
 - **UI Components**: shadcn/ui, Tailwind CSS
 - **State Management**: SWR for data fetching
-- **Database**: Supabase (PostgreSQL)
+- **Database**: Neon (PostgreSQL)
 - **File Processing**: Client-side HTML/CSV parsing
 
 ### 4.2 Page Structure
@@ -516,7 +516,7 @@ CREATE TABLE trade_codes (
 ## 7. Security Considerations
 
 - Row Level Security (RLS) on all tables
-- API authentication via Supabase Auth
+- API authentication via Neon Auth
 - Sensitive data encryption
 - Audit logging for all changes
 

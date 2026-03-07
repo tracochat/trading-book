@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useMemo } from "react"
+import { useState, useMemo, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { format } from "date-fns"
 import { 
@@ -69,8 +69,19 @@ interface TradesClientProps {
 
 export function TradesClient({ initialTrades, accounts, instruments, portfolios }: TradesClientProps) {
   const router = useRouter()
-  const [trades] = useState<Trade[]>(initialTrades)
+  const [trades, setTrades] = useState<Trade[]>(initialTrades)
+  // keep local trades array in sync when props are refreshed
+  useEffect(() => {
+    setTrades(initialTrades)
+  }, [initialTrades])
   const [isDialogOpen, setIsDialogOpen] = useState(false)
+  // reset filters whenever data changes
+  useEffect(() => {
+    setSearchQuery('')
+    setFilterAccount('all')
+    setFilterTradeType('all')
+    setDateRange({})
+  }, [trades])
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
   const [editingTrade, setEditingTrade] = useState<Trade | null>(null)
   const [deletingTrade, setDeletingTrade] = useState<Trade | null>(null)
@@ -137,6 +148,7 @@ export function TradesClient({ initialTrades, accounts, instruments, portfolios 
   const openCreateDialog = () => {
     resetForm()
     setIsDialogOpen(true)
+    router.refresh() // ensure fresh portfolios list after potential changes
   }
 
   const openEditDialog = (trade: Trade) => {
@@ -147,7 +159,7 @@ export function TradesClient({ initialTrades, accounts, instruments, portfolios 
       instrument_id: trade.instrument_id,
       trade_date: trade.trade_date,
       settle_date: trade.settle_date || '',
-      trade_type: trade.trade_type,
+      trade_type: trade.order_type || trade.trade_type || 'Buy',
       quantity: trade.quantity,
       price: trade.price,
       commission: trade.commission,
@@ -176,10 +188,17 @@ export function TradesClient({ initialTrades, accounts, instruments, portfolios 
     setIsLoading(true)
 
     const { gross, net } = calculateAmounts()
+    // build payload including required schema fields
+    // ensure trade_type is never blank (defensive fallback)
     const submitData = {
       ...formData,
+      trade_type: formData.trade_type || 'Buy',
       gross_amount: gross,
       net_amount: net,
+      symbol: selectedInstrument?.symbol || '',
+      description: selectedInstrument?.description || '',
+      asset_category: selectedInstrument?.asset_class || '',
+      buy_sell: (formData.trade_type || 'Buy').startsWith('Buy') ? 'BUY' : 'SELL',
     }
 
     try {
@@ -230,7 +249,8 @@ export function TradesClient({ initialTrades, accounts, instruments, portfolios 
     }
   }
 
-  const getTradeTypeColor = (type: TradeType) => {
+  const getTradeTypeColor = (type?: TradeType) => {
+    if (!type) return 'bg-gray-100 text-gray-800'
     if (type.includes('Buy')) return 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400'
     return 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400'
   }
@@ -485,13 +505,13 @@ export function TradesClient({ initialTrades, accounts, instruments, portfolios 
                   <Label htmlFor="portfolio_id">Portfolio</Label>
                   <Select 
                     value={formData.portfolio_id} 
-                    onValueChange={(value) => setFormData({ ...formData, portfolio_id: value })}
+                    onValueChange={(value) => setFormData({ ...formData, portfolio_id: value === 'none' ? '' : value })}
                   >
                     <SelectTrigger>
                       <SelectValue placeholder="Select portfolio" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="">None</SelectItem>
+                      <SelectItem value="none">None</SelectItem>
                       {portfolios.map((p) => (
                         <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
                       ))}

@@ -1,4 +1,5 @@
-import { createClient } from "@/lib/supabase/server"
+import { db, sql } from "@/lib/db"
+import { dividends, instruments, accounts } from "@/schema/schema"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import {
   Table,
@@ -12,22 +13,18 @@ import { Banknote } from "lucide-react"
 import { format } from "date-fns"
 
 async function getDividends() {
-  const supabase = await createClient()
-  const { data, error } = await supabase
-    .from('dividends')
-    .select(`
-      *,
-      instrument:instruments(symbol, description),
-      account:accounts(account_name, platform)
-    `)
-    .order('pay_date', { ascending: false })
-  
-  if (error) {
-    console.error('Error fetching dividends:', error)
-    return []
-  }
-  
-  return data || []
+  const rows = await db
+    .select({ dividend: dividends, instrument: instruments, account: accounts })
+    .from(dividends)
+    .leftJoin(instruments, sql`${instruments.id} = ${dividends.instrument_id}`)
+    .leftJoin(accounts, sql`${accounts.id} = ${dividends.account_id}`)
+    .orderBy(dividends.pay_date, 'desc')
+
+  return rows.map(r => ({
+    ...r.dividend,
+    instrument: r.instrument,
+    account: r.account,
+  }))
 }
 
 function formatCurrency(amount: number, currency: string) {

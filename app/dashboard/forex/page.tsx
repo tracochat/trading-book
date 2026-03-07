@@ -1,6 +1,7 @@
 "use server"
 
-import { createClient } from "@/lib/supabase/server"
+import { db, sql } from "@/lib/db"
+import { forexBalances, accounts } from "@/schema/schema"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import {
   Table,
@@ -14,22 +15,14 @@ import { Banknote, ArrowRightLeft, DollarSign } from "lucide-react"
 import { format } from "date-fns"
 
 async function getForexBalances() {
-  const supabase = await createClient()
-  const { data, error } = await supabase
-    .from('forex_balances')
-    .select(`
-      *,
-      account:accounts(account_id, account_name)
-    `)
-    .order('as_of_date', { ascending: false })
+  const rows = await db
+    .select({ bal: forexBalances, account: accounts })
+    .from(forexBalances)
+    .leftJoin(accounts, sql`${accounts.id} = ${forexBalances.account_id}`)
+    .orderBy(forexBalances.as_of_date, 'desc')
     .limit(200)
-  
-  if (error) {
-    console.error('Error fetching forex balances:', error)
-    return []
-  }
-  
-  return data || []
+
+  return rows.map(r => ({ ...r.bal, account: r.account }))
 }
 
 function formatCurrency(amount: number, currency: string) {

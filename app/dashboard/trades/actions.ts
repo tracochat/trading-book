@@ -1,8 +1,9 @@
 "use server"
 
-import { createClient } from "@/lib/supabase/server"
 import { revalidatePath } from "next/cache"
 import type { TradeFormData } from "@/lib/types"
+import { db, sql } from "@/lib/db"
+import { trades as tradesTable } from "@/schema/schema"
 
 interface TradeInput {
   account_id: string
@@ -20,33 +21,41 @@ interface TradeInput {
   notes: string
   external_id: string
   gross_amount: number
-  net_amount: number
+  // derived fields required by the schema
+  symbol: string
+  description?: string
+  asset_category: string
+  buy_sell: string
 }
 
 export async function createTrade(data: TradeInput) {
-  const supabase = await createClient()
-  
-  const { error } = await supabase.from('trades').insert({
-    account_id: data.account_id,
-    portfolio_id: data.portfolio_id || null,
-    instrument_id: data.instrument_id,
-    trade_date: data.trade_date,
-    settle_date: data.settle_date || null,
-    trade_type: data.trade_type,
-    quantity: data.quantity,
-    price: data.price,
-    gross_amount: data.gross_amount,
-    commission: data.commission,
-    fees: data.fees,
-    net_amount: data.net_amount,
-    currency: data.currency,
-    fx_rate: data.fx_rate || null,
-    notes: data.notes || null,
-    external_id: data.external_id || null,
-  })
-
-  if (error) {
-    return { error: error.message }
+  console.log('createTrade data:', data)
+  try {
+    await db.insert(tradesTable).values({
+      account_id: data.account_id,
+      portfolio_id: data.portfolio_id || null,
+      instrument_id: data.instrument_id,
+      // required lookup fields
+      symbol: data.symbol,
+      description: data.description || null,
+      asset_category: data.asset_category,
+      buy_sell: data.buy_sell,
+      trade_date: data.trade_date,
+      settle_date: data.settle_date || null,
+      order_type: data.trade_type || 'Buy',
+      quantity: data.quantity,
+      trade_price: data.price,
+      proceeds: data.gross_amount,
+      comm_fee: data.commission,
+      other_fees: data.fees,
+      // net_amount is not a column in schema, drop it
+      currency: data.currency,
+      fx_rate_to_base: data.fx_rate || null,
+      notes: data.notes || null,
+      trade_id: data.external_id || null,
+    })
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : String(error) }
   }
 
   revalidatePath('/dashboard/trades')
@@ -55,33 +64,36 @@ export async function createTrade(data: TradeInput) {
 }
 
 export async function updateTrade(id: string, data: Partial<TradeInput>) {
-  const supabase = await createClient()
-  
-  const { error } = await supabase
-    .from('trades')
-    .update({
-      account_id: data.account_id,
-      portfolio_id: data.portfolio_id || null,
-      instrument_id: data.instrument_id,
-      trade_date: data.trade_date,
-      settle_date: data.settle_date || null,
-      trade_type: data.trade_type,
-      quantity: data.quantity,
-      price: data.price,
-      gross_amount: data.gross_amount,
-      commission: data.commission,
-      fees: data.fees,
-      net_amount: data.net_amount,
-      currency: data.currency,
-      fx_rate: data.fx_rate || null,
-      notes: data.notes || null,
-      external_id: data.external_id || null,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', id)
-
-  if (error) {
-    return { error: error.message }
+  try {
+    await db
+      .update(tradesTable)
+      .set({
+        account_id: data.account_id,
+        portfolio_id: data.portfolio_id || null,
+        instrument_id: data.instrument_id,
+        symbol: data.symbol,
+        description: data.description || null,
+        asset_category: data.asset_category,
+        buy_sell: data.buy_sell,
+        trade_date: data.trade_date,
+        settle_date: data.settle_date || null,
+        order_type: data.trade_type || 'Buy',
+        quantity: data.quantity,
+        trade_price: data.price,
+        proceeds: data.gross_amount,
+        comm_fee: data.commission,
+        other_fees: data.fees,
+        // net_amount removed
+        currency: data.currency,
+        fx_rate_to_base: data.fx_rate || null,
+        notes: data.notes || null,
+        trade_id: data.external_id || null,
+        updated_at: new Date(),
+      })
+      .where(sql`${tradesTable.id} = ${id}`)
+      
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : String(error) }
   }
 
   revalidatePath('/dashboard/trades')
@@ -90,15 +102,10 @@ export async function updateTrade(id: string, data: Partial<TradeInput>) {
 }
 
 export async function deleteTrade(id: string) {
-  const supabase = await createClient()
-  
-  const { error } = await supabase
-    .from('trades')
-    .delete()
-    .eq('id', id)
-
-  if (error) {
-    return { error: error.message }
+  try {
+    await db.delete(tradesTable).where(sql`${tradesTable.id} = ${id}`)
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : String(error) }
   }
 
   revalidatePath('/dashboard/trades')

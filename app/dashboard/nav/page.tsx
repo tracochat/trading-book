@@ -1,4 +1,3 @@
-import { createClient } from "@/lib/supabase/server"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import {
   Table,
@@ -8,27 +7,31 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { db, sql } from "@/lib/db"
+import { navSnapshots, accounts as accountsTable } from "@/schema/schema"
 import { Wallet, TrendingUp, DollarSign, Landmark } from "lucide-react"
 import { format } from "date-fns"
 
 async function getNavSnapshots() {
-  const supabase = await createClient()
-  const { data, error } = await supabase
-    .from('nav_snapshots')
-    .select(`
-      *,
-      account:accounts(account_id, account_name),
-      portfolio:portfolios(name)
-    `)
-    .order('as_of_date', { ascending: false })
-    .limit(100)
-  
-  if (error) {
+  try {
+    const rows = await db
+      .select({
+        ns: navSnapshots,
+        account: {
+          account_id: accountsTable.account_id,
+          account_name: accountsTable.account_name,
+        },
+      })
+      .from(navSnapshots)
+      .leftJoin(accountsTable, sql`${accountsTable.id} = ${navSnapshots.account_id}`)
+      .orderBy(navSnapshots.as_of_date, 'desc')
+      .limit(100)
+
+    return rows.map(r => ({ ...r.ns, account: r.account }))
+  } catch (error) {
     console.error('Error fetching NAV:', error)
     return []
   }
-  
-  return data || []
 }
 
 function formatCurrency(amount: number, currency: string) {

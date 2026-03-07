@@ -1,4 +1,5 @@
-import { createClient } from "@/lib/supabase/server"
+import { db, sql } from "@/lib/db"
+import { reconciliationLog as reconLog, activityImports, accounts as accountsTable } from "@/schema/schema"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import {
   Table,
@@ -15,44 +16,35 @@ import { format } from "date-fns"
 import Link from "next/link"
 
 async function getReconciliationLogs(importId?: string) {
-  const supabase = await createClient()
-  
-  let query = supabase
-    .from('reconciliation_log')
-    .select(`
-      *,
-      import:activity_imports(filename, account:accounts(account_name))
-    `)
-    .order('created_at', { ascending: false })
+  // replaced by Drizzle: build a joined query
+  const base = db
+    .select({
+      rl: reconLog,
+      import: {
+        filename: activityImports.file_name,
+        account: { account_name: accountsTable.account_name },
+      },
+    })
+    .from(reconLog)
+    .leftJoin(activityImports, sql`${activityImports.id} = ${reconLog.import_id}`)
+    .leftJoin(accountsTable, sql`${accountsTable.id} = ${activityImports.account_id}`)
+    .orderBy(reconLog.created_at, 'desc')
     .limit(100)
-  
-  if (importId) {
-    query = query.eq('import_id', importId)
-  }
-  
-  const { data, error } = await query
-  
-  if (error) {
-    console.error('Error fetching reconciliation logs:', error)
-    return []
-  }
-  
-  return data || []
+  const rows = importId
+    ? await base.where(reconLog.import_id.eq(importId))
+    : await base
+  return rows.map(r => ({ ...r.rl, import: r.import }))
 }
 
 async function getRecentImports() {
-  const supabase = await createClient()
-  const { data, error } = await supabase
-    .from('activity_imports')
-    .select(`
-      *,
-      account:accounts(account_name)
-    `)
-    .order('created_at', { ascending: false })
+  const rows = await db
+    .select({ imp: activityImports, account: { account_name: accountsTable.account_name } })
+    .from(activityImports)
+    .leftJoin(accountsTable, sql`${accountsTable.id} = ${activityImports.account_id}`)
+    .orderBy(activityImports.imported_at, 'desc')
     .limit(10)
-  
-  if (error) return []
-  return data || []
+
+  return rows.map(r => ({ ...r.imp, account: r.account }))
 }
 
 interface PageProps {

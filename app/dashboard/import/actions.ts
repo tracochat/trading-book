@@ -1,7 +1,17 @@
 "use server"
 
-import { createClient } from "@/lib/supabase/server"
+import { db } from "@/lib/db"
 import { revalidatePath } from "next/cache"
+import {
+  instruments,
+  trades,
+  dividends,
+  cashTransactions,
+  transactionFees,
+  interest,
+  withholdingTax,
+  activityImports,
+} from "@/schema/schema"
 
 interface ParsedTrade {
   trade_date: string
@@ -421,11 +431,9 @@ export async function createActivityImport(data: {
   period_start?: string
   period_end?: string
 }) {
-  const supabase = await createClient()
-  
-  const { data: result, error } = await supabase
-    .from('activity_imports')
-    .insert({
+  const [row] = await db
+    .insert(activityImports)
+    .values({
       account_id: data.account_id,
       file_name: data.file_name,
       platform: data.platform,
@@ -435,15 +443,9 @@ export async function createActivityImport(data: {
       records_imported: 0,
       records_failed: 0,
     })
-    .select('id')
-    .single()
-
-  if (error) {
-    console.error('Error creating import record:', error)
-    return { error: error.message }
-  }
-
-  return { id: result.id }
+    .returning({ id: activityImports.id })
+  
+  return { id: row?.id }
 }
 
 export async function processImportedData(
@@ -451,230 +453,141 @@ export async function processImportedData(
   data: ParsedData,
   accountId: string
 ) {
-  const supabase = await createClient()
   let totalRecords = 0
   let failedRecords = 0
   const errors: string[] = []
 
-  // Get or create instruments for the symbols
+  // gather symbols and filter
   const symbols = new Set([
     ...data.trades.map(t => t.symbol),
     ...data.dividends.map(d => d.symbol),
     ...data.withholdingTax.filter(w => w.symbol).map(w => w.symbol!),
     ...data.fees.filter(f => f.symbol).map(f => f.symbol!),
   ])
-
-  // Remove any invalid symbols
   symbols.delete('UNKNOWN')
   symbols.delete('')
 
-  const { data: existingInstruments } = await supabase
-    .from('instruments')
-    .select('id, symbol')
-    .in('symbol', Array.from(symbols))
+  const existing = await db
+    .select({ id: instruments.id, symbol: instruments.symbol })
+    .from(instruments)
+    .where(instruments.symbol.in(Array.from(symbols)))
 
-  const instrumentMap = new Map(existingInstruments?.map(i => [i.symbol, i.id]) || [])
+  const instrumentMap = new Map(existing.map(i => [i.symbol, i.id]))
 
-  // Create missing instruments
   const missingSymbols = Array.from(symbols).filter(s => s && !instrumentMap.has(s))
-  if (missingSymbols.length > 0) {
-    const { data: newInstruments, error: instError } = await supabase
-      .from('instruments')
-      .insert(missingSymbols.map(symbol => ({
-        symbol,
-        asset_category: 'Stocks',
-        currency: 'USD',
-        multiplier: 1,
-        is_active: true,
-        is_traded: true,
-      })))
-      .select('id, symbol')
+  if (missingSymbols.length) {
+    const created = await db
+      .insert(instruments)
+      .values(
+        missingSymbols.map(symbol => ({
+          symbol,
+          asset_category: 'Stocks',
+          currency: 'USD',
+          multiplier: 1,
+          is_active: true,
+          is_traded: true,
+        }))
+      )
+      .returning({ id: instruments.id, symbol: instruments.symbol })
 
-    if (instError) {
-      errors.push(`Failed to create instruments: ${instError.message}`)
-    } else {
-      newInstruments?.forEach(i => instrumentMap.set(i.symbol, i.id))
+    created.forEach(i => instrumentMap.set(i.symbol, i.id))
+  }
+
+  // helper to upsert batch data
+  const upsertBatch = async (table: any, rows: any[]) => {
+    if (rows.length === 0) return 0
+    try {
+      await db.insert(table).values(rows)
+      return rows.length
+    } catch (err: any) {
+      errors.push(`Failed to insert into ${table.name}: ${err.message}`)
+      return rows.length
     }
   }
 
-  // Import trades
-  if (data.trades.length > 0) {
-    const tradesToInsert = data.trades.map(t => ({
-      account_id: accountId,
-      instrument_id: instrumentMap.get(t.symbol) || null,
-      symbol: t.symbol,
-      description: t.description || null,
-      asset_category: t.asset_category,
-      trade_date: t.trade_date,
-      settle_date: t.settle_date || null,
-      quantity: t.quantity,
-      trade_price: t.price,
-      currency: t.currency,
-      proceeds: t.proceeds,
-      comm_fee: t.commission,
-      other_fees: t.fees,
-      buy_sell: t.buy_sell,
-      source: 'import',
-      is_reconciled: true,
-    }))
+  totalRecords += await upsertBatch(trades, data.trades.map(t => ({
+    account_id: accountId,
+    instrument_id: instrumentMap.get(t.symbol) || null,
+    symbol: t.symbol,
+    description: t.description || null,
+    asset_category: t.asset_category,
+    trade_date: t.trade_date,
+    settle_date: t.settle_date || null,
+    quantity: t.quantity,
+    trade_price: t.price,
+    currency: t.currency,
+    proceeds: t.proceeds,
+    comm_fee: t.commission,
+    other_fees: t.fees,
+    buy_sell: t.buy_sell,
+    source: 'import',
+    is_reconciled: true,
+  })))
 
-    if (tradesToInsert.length > 0) {
-      const { error: tradesError, data: insertedTrades } = await supabase
-        .from('trades')
-        .insert(tradesToInsert)
-        .select()
+  totalRecords += await upsertBatch(dividends, data.dividends.map(d => ({
+    account_id: accountId,
+    instrument_id: instrumentMap.get(d.symbol) || null,
+    symbol: d.symbol,
+    description: d.description || null,
+    currency: d.currency,
+    pay_date: d.pay_date,
+    gross_amount: d.gross_amount,
+    net_amount: d.net_amount,
+    tax: d.withholding_tax,
+  })))
 
-      if (tradesError) {
-        errors.push(`Failed to import trades: ${tradesError.message}`)
-        failedRecords += tradesToInsert.length
-      } else {
-        totalRecords += insertedTrades?.length || 0
-      }
-    }
-  }
+  totalRecords += await upsertBatch(cashTransactions, data.deposits.map(d => ({
+    account_id: accountId,
+    transaction_date: d.transaction_date,
+    currency: d.currency,
+    amount: d.amount,
+    transaction_type: d.transaction_type,
+    description: d.description || null,
+  })))
 
-  // Import dividends
-  if (data.dividends.length > 0) {
-    const dividendsToInsert = data.dividends.map(d => ({
-      account_id: accountId,
-      instrument_id: instrumentMap.get(d.symbol) || null,
-      symbol: d.symbol,
-      description: d.description || null,
-      currency: d.currency,
-      pay_date: d.pay_date,
-      gross_amount: d.gross_amount,
-      net_amount: d.net_amount,
-      tax: d.withholding_tax,
-    }))
+  totalRecords += await upsertBatch(transactionFees, data.fees.map(f => ({
+    account_id: accountId,
+    instrument_id: f.symbol ? instrumentMap.get(f.symbol) || null : null,
+    symbol: f.symbol || null,
+    fee_date: f.fee_date,
+    fee_type: f.fee_type,
+    amount: f.amount,
+    currency: f.currency,
+    description: f.description || null,
+  })))
 
-    if (dividendsToInsert.length > 0) {
-      const { error: divError, data: insertedDivs } = await supabase
-        .from('dividends')
-        .insert(dividendsToInsert)
-        .select()
+  totalRecords += await upsertBatch(interest, data.interest.map(i => ({
+    account_id: accountId,
+    interest_date: i.interest_date,
+    amount: i.amount,
+    currency: i.currency,
+    interest_type: i.interest_type || null,
+    description: i.description || null,
+  })))
 
-      if (divError) {
-        errors.push(`Failed to import dividends: ${divError.message}`)
-        failedRecords += dividendsToInsert.length
-      } else {
-        totalRecords += insertedDivs?.length || 0
-      }
-    }
-  }
+  totalRecords += await upsertBatch(withholdingTax, data.withholdingTax.map(w => ({
+    account_id: accountId,
+    instrument_id: w.symbol ? instrumentMap.get(w.symbol) || null : null,
+    symbol: w.symbol || 'UNKNOWN',
+    tax_date: w.tax_date,
+    amount: w.amount,
+    currency: w.currency,
+    description: w.description || null,
+  })))
 
-  // Import deposits/withdrawals
-  if (data.deposits.length > 0) {
-    const depositsToInsert = data.deposits.map(d => ({
-      account_id: accountId,
-      transaction_date: d.transaction_date,
-      currency: d.currency,
-      amount: d.amount,
-      transaction_type: d.transaction_type,
-      description: d.description || null,
-    }))
-
-    const { error: depError, data: insertedDeps } = await supabase
-      .from('cash_transactions')
-      .insert(depositsToInsert)
-      .select()
-
-    if (depError) {
-      errors.push(`Failed to import deposits: ${depError.message}`)
-      failedRecords += depositsToInsert.length
-    } else {
-      totalRecords += insertedDeps?.length || 0
-    }
-  }
-
-  // Import fees
-  if (data.fees.length > 0) {
-    const feesToInsert = data.fees.map(f => ({
-      account_id: accountId,
-      instrument_id: f.symbol ? instrumentMap.get(f.symbol) || null : null,
-      symbol: f.symbol || null,
-      fee_date: f.fee_date,
-      fee_type: f.fee_type,
-      amount: f.amount,
-      currency: f.currency,
-      description: f.description || null,
-    }))
-
-    const { error: feeError, data: insertedFees } = await supabase
-      .from('transaction_fees')
-      .insert(feesToInsert)
-      .select()
-
-    if (feeError) {
-      errors.push(`Failed to import fees: ${feeError.message}`)
-      failedRecords += feesToInsert.length
-    } else {
-      totalRecords += insertedFees?.length || 0
-    }
-  }
-
-  // Import interest
-  if (data.interest.length > 0) {
-    const interestToInsert = data.interest.map(i => ({
-      account_id: accountId,
-      interest_date: i.interest_date,
-      amount: i.amount,
-      currency: i.currency,
-      interest_type: i.interest_type || null,
-      description: i.description || null,
-    }))
-
-    const { error: intError, data: insertedInt } = await supabase
-      .from('interest')
-      .insert(interestToInsert)
-      .select()
-
-    if (intError) {
-      errors.push(`Failed to import interest: ${intError.message}`)
-      failedRecords += interestToInsert.length
-    } else {
-      totalRecords += insertedInt?.length || 0
-    }
-  }
-
-  // Import withholding tax
-  if (data.withholdingTax.length > 0) {
-    const taxToInsert = data.withholdingTax.map(w => ({
-      account_id: accountId,
-      instrument_id: w.symbol ? instrumentMap.get(w.symbol) || null : null,
-      symbol: w.symbol || 'UNKNOWN',
-      tax_date: w.tax_date,
-      amount: w.amount,
-      currency: w.currency,
-      description: w.description || null,
-    }))
-
-    const { error: taxError, data: insertedTax } = await supabase
-      .from('withholding_tax')
-      .insert(taxToInsert)
-      .select()
-
-    if (taxError) {
-      errors.push(`Failed to import withholding tax: ${taxError.message}`)
-      failedRecords += taxToInsert.length
-    } else {
-      totalRecords += insertedTax?.length || 0
-    }
-  }
-
-  // Update import record
-  const finalStatus = errors.length > 0 
+  const finalStatus = errors.length > 0
     ? (totalRecords > 0 ? 'partial' : 'failed')
     : 'completed'
 
-  await supabase
-    .from('activity_imports')
-    .update({
+  await db
+    .update(activityImports)
+    .set({
       import_status: finalStatus,
       records_imported: totalRecords,
       records_failed: failedRecords,
-      error_log: errors.length > 0 ? { errors } : null,
+      error_log: errors.length ? { errors } : null,
     })
-    .eq('id', importId)
+    .where(sql`${activityImports.id} = ${importId}`)
 
   revalidatePath('/dashboard/import')
   revalidatePath('/dashboard/trades')

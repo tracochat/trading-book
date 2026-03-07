@@ -1,6 +1,7 @@
 "use server"
 
-import { createClient } from "@/lib/supabase/server"
+import { db, sql } from "@/lib/db"
+import { withholdingTax, accounts as accountsTable, instruments as instrumentsTable } from "@/schema/schema"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import {
   Table,
@@ -14,23 +15,23 @@ import { FileText, DollarSign } from "lucide-react"
 import { format } from "date-fns"
 
 async function getWithholdingTax() {
-  const supabase = await createClient()
-  const { data, error } = await supabase
-    .from('withholding_tax')
-    .select(`
-      *,
-      account:accounts(account_id, account_name),
-      instrument:instruments(symbol, name)
-    `)
-    .order('date', { ascending: false })
-    .limit(200)
-  
-  if (error) {
+  try {
+    const rows = await db
+      .select({
+        wt: withholdingTax,
+        account: { account_id: accountsTable.account_id, account_name: accountsTable.account_name },
+        instrument: { symbol: instrumentsTable.symbol, description: instrumentsTable.description },
+      })
+      .from(withholdingTax)
+      .leftJoin(accountsTable, sql`${accountsTable.id} = ${withholdingTax.account_id}`)
+      .leftJoin(instrumentsTable, sql`${instrumentsTable.id} = ${withholdingTax.instrument_id}`)
+      .orderBy(withholdingTax.tax_date, 'desc')
+      .limit(200)
+    return rows.map(r => ({ ...r.wt, account: r.account, instrument: r.instrument }))
+  } catch (error) {
     console.error('Error fetching withholding tax:', error)
     return []
   }
-  
-  return data || []
 }
 
 function formatCurrency(amount: number, currency: string) {

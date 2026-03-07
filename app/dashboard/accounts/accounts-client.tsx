@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { Plus, MoreHorizontal, Pencil, Trash2, Building2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -60,7 +60,14 @@ interface AccountsClientProps {
 
 export function AccountsClient({ initialAccounts }: AccountsClientProps) {
   const router = useRouter()
+  // keep a local copy in state only if you need to modify optimistically;
+  // otherwise render directly from props so router.refresh works correctly.
   const [accounts, setAccounts] = useState<Account[]>(initialAccounts)
+
+  // sync prop changes (due to router.refresh) into local state
+  useEffect(() => {
+    setAccounts(initialAccounts)
+  }, [initialAccounts])
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
   const [editingAccount, setEditingAccount] = useState<Account | null>(null)

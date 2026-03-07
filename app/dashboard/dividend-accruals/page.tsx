@@ -1,4 +1,5 @@
-import { createClient } from "@/lib/supabase/server"
+import { db, sql } from "@/lib/db"
+import { dividendAccruals, accounts as accountsTable } from "@/schema/schema"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import {
   Table,
@@ -13,22 +14,25 @@ import { DollarSign } from "lucide-react"
 import { format } from "date-fns"
 
 async function getDividendAccruals() {
-  const supabase = await createClient()
-  const { data, error } = await supabase
-    .from('dividend_accruals')
-    .select(`
-      *,
-      account:accounts(account_name, platform)
-    `)
-    .order('ex_date', { ascending: false })
-    .limit(200)
-  
-  if (error) {
-    console.error('Error fetching dividend accruals:', error)
+  try {
+    const rows = await db
+      .select({
+        da: dividendAccruals,
+        account: {
+          account_name: accountsTable.account_name,
+          platform: accountsTable.platform,
+        },
+      })
+      .from(dividendAccruals)
+      .leftJoin(accountsTable, sql`${accountsTable.id} = ${dividendAccruals.account_id}`)
+      .orderBy(dividendAccruals.ex_date, 'desc')
+      .limit(200)
+
+    return rows.map(r => ({ ...r.da, account: r.account }))
+  } catch (error) {
+    console.error('Error fetching accruals:', error)
     return []
   }
-  
-  return data || []
 }
 
 export default async function DividendAccrualsPage() {
