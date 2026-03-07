@@ -38,11 +38,28 @@ async function getPortfolioStats() {
   return stats
 }
 
+async function getAccounts() {
+  const supabase = await createClient()
+  const { data, error } = await supabase
+    .from('accounts')
+    .select('*')
+    .eq('status', 'active')
+    .order('account_name', { ascending: true })
+  
+  if (error) {
+    console.error('Error fetching accounts:', error)
+    return []
+  }
+  
+  return data || []
+}
+
 export default async function PortfoliosPage() {
-  const [portfolios, stats] = await Promise.all([
+  const [portfolios, stats, accounts] = await Promise.all([
     getPortfolios(),
     getPortfolioStats(),
+    getAccounts(),
   ])
   
-  return <PortfoliosClient initialPortfolios={portfolios} portfolioStats={stats} />
+  return <PortfoliosClient initialPortfolios={portfolios} portfolioStats={stats} accounts={accounts} />
 }

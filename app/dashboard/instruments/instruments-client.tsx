@@ -50,12 +50,12 @@ import { Badge } from "@/components/ui/badge"
 import { Switch } from "@/components/ui/switch"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { toast } from "sonner"
-import type { Instrument, AssetClass } from "@/lib/types"
-import { createInstrument, updateInstrument, deleteInstrument, bulkImportInstruments } from "./actions"
+import type { Instrument, AssetCategory } from "@/lib/types"
+import { createInstrument, updateInstrument, deleteInstrument, bulkImportInstruments, parseInstrumentFile } from "./actions"
 
-const assetClasses: AssetClass[] = ['Stocks', 'Equity and Index Options', 'Bonds', 'Futures', 'Forex', 'CFD', 'Crypto', 'Other']
+const assetCategories: AssetCategory[] = ['Stocks', 'Equity and Index Options', 'Bonds', 'Cash', 'Futures', 'Forex', 'Funds', 'Warrants', 'CFD', 'Other']
 const currencies = ['USD', 'SGD', 'HKD', 'EUR', 'GBP', 'JPY', 'CNY', 'AUD', 'CAD']
-const exchanges = ['NYSE', 'NASDAQ', 'AMEX', 'SGX', 'HKEX', 'LSE', 'TSE', 'SSE', 'SZSE', 'Other']
+const exchanges = ['NYSE', 'NASDAQ', 'AMEX', 'ARCA', 'SGX', 'HKEX', 'LSE', 'TSE', 'SSE', 'SZSE', 'Other']
 
 interface InstrumentsClientProps {
   initialInstruments: Instrument[]
@@ -72,7 +72,7 @@ export function InstrumentsClient({ initialInstruments, tradedInstrumentIds }: I
   const [deletingInstrument, setDeletingInstrument] = useState<Instrument | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
-  const [filterAssetClass, setFilterAssetClass] = useState<string>('all')
+  const [filterAssetCategory, setFilterAssetCategory] = useState<string>('all')
   const [showTradedOnly, setShowTradedOnly] = useState(false)
   const [importFile, setImportFile] = useState<File | null>(null)
   const [importProgress, setImportProgress] = useState<string>('')
@@ -83,19 +83,16 @@ export function InstrumentsClient({ initialInstruments, tradedInstrumentIds }: I
     symbol: '',
     con_id: '',
     description: '',
-    asset_class: 'Stocks' as AssetClass,
-    exchange: '',
+    asset_category: 'Stocks' as AssetCategory,
+    listing_exchange: '',
     currency: 'USD',
     multiplier: 1,
-    listing_exchange: '',
-    sector: '',
-    industry: '',
-    country: '',
     isin: '',
     cusip: '',
-    sedol: '',
+    figi: '',
+    issuer_country_code: '',
     is_active: true,
-    is_tradeable: true,
+    is_traded: false,
   })
 
   const filteredInstruments = useMemo(() => {
@@ -104,32 +101,29 @@ export function InstrumentsClient({ initialInstruments, tradedInstrumentIds }: I
         inst.symbol.toLowerCase().includes(searchQuery.toLowerCase()) ||
         (inst.description?.toLowerCase().includes(searchQuery.toLowerCase()))
       
-      const matchesAssetClass = filterAssetClass === 'all' || inst.asset_class === filterAssetClass
+      const matchesAssetCategory = filterAssetCategory === 'all' || inst.asset_category === filterAssetCategory
       
-      const matchesTradedFilter = !showTradedOnly || tradedSet.has(inst.id)
+      const matchesTradedFilter = !showTradedOnly || inst.is_traded || tradedSet.has(inst.id)
       
-      return matchesSearch && matchesAssetClass && matchesTradedFilter
+      return matchesSearch && matchesAssetCategory && matchesTradedFilter
     })
-  }, [instruments, searchQuery, filterAssetClass, showTradedOnly, tradedSet])
+  }, [instruments, searchQuery, filterAssetCategory, showTradedOnly, tradedSet])
 
   const resetForm = () => {
     setFormData({
       symbol: '',
       con_id: '',
       description: '',
-      asset_class: 'Stocks',
-      exchange: '',
+      asset_category: 'Stocks',
+      listing_exchange: '',
       currency: 'USD',
       multiplier: 1,
-      listing_exchange: '',
-      sector: '',
-      industry: '',
-      country: '',
       isin: '',
       cusip: '',
-      sedol: '',
+      figi: '',
+      issuer_country_code: '',
       is_active: true,
-      is_tradeable: true,
+      is_traded: false,
     })
     setEditingInstrument(null)
   }
@@ -145,19 +139,16 @@ export function InstrumentsClient({ initialInstruments, tradedInstrumentIds }: I
       symbol: instrument.symbol,
       con_id: instrument.con_id || '',
       description: instrument.description || '',
-      asset_class: instrument.asset_class,
-      exchange: instrument.exchange || '',
+      asset_category: instrument.asset_category,
+      listing_exchange: instrument.listing_exchange || '',
       currency: instrument.currency,
       multiplier: instrument.multiplier,
-      listing_exchange: instrument.listing_exchange || '',
-      sector: instrument.sector || '',
-      industry: instrument.industry || '',
-      country: instrument.country || '',
       isin: instrument.isin || '',
       cusip: instrument.cusip || '',
-      sedol: instrument.sedol || '',
+      figi: instrument.figi || '',
+      issuer_country_code: instrument.issuer_country_code || '',
       is_active: instrument.is_active,
-      is_tradeable: instrument.is_tradeable,
+      is_traded: instrument.is_traded,
     })
     setIsDialogOpen(true)
   }
@@ -226,45 +217,15 @@ export function InstrumentsClient({ initialInstruments, tradedInstrumentIds }: I
 
     try {
       const text = await importFile.text()
-      const lines = text.split('\n').filter(line => line.trim())
       
-      if (lines.length < 2) {
-        toast.error('File appears to be empty or invalid')
-        return
-      }
-
       setImportProgress('Parsing data...')
-      const header = lines[0].split(',').map(h => h.trim().toLowerCase())
-      const symbolIdx = header.findIndex(h => h === 'symbol' || h === 'ticker')
-      const nameIdx = header.findIndex(h => h === 'name' || h === 'description' || h === 'company name')
-      const exchangeIdx = header.findIndex(h => h === 'exchange' || h === 'market')
-      const sectorIdx = header.findIndex(h => h === 'sector')
-      const industryIdx = header.findIndex(h => h === 'industry')
-      const countryIdx = header.findIndex(h => h === 'country')
-
-      if (symbolIdx === -1) {
-        toast.error('Could not find Symbol column in file')
+      
+      // Use the server-side parsing function
+      const instrumentsToImport = parseInstrumentFile(text, importFile.name)
+      
+      if (instrumentsToImport.length === 0) {
+        toast.error('No valid instruments found in file. Check the file format.')
         return
-      }
-
-      const instrumentsToImport = []
-      for (let i = 1; i < lines.length; i++) {
-        const values = lines[i].split(',').map(v => v.trim().replace(/^"|"$/g, ''))
-        if (values[symbolIdx]) {
-          instrumentsToImport.push({
-            symbol: values[symbolIdx],
-            description: nameIdx !== -1 ? values[nameIdx] : null,
-            exchange: exchangeIdx !== -1 ? values[exchangeIdx] : null,
-            sector: sectorIdx !== -1 ? values[sectorIdx] : null,
-            industry: industryIdx !== -1 ? values[industryIdx] : null,
-            country: countryIdx !== -1 ? values[countryIdx] : null,
-            asset_class: 'Stocks' as AssetClass,
-            currency: 'USD',
-            multiplier: 1,
-            is_active: true,
-            is_tradeable: true,
-          })
-        }
       }
 
       setImportProgress(`Importing ${instrumentsToImport.length} instruments...`)
@@ -274,27 +235,32 @@ export function InstrumentsClient({ initialInstruments, tradedInstrumentIds }: I
       if (result.error) {
         toast.error(result.error)
       } else {
-        toast.success(`Successfully imported ${result.count} instruments`)
+        const msg = result.skipped && result.skipped > 0 
+          ? `Imported ${result.count} instruments (${result.skipped} duplicates skipped)`
+          : `Successfully imported ${result.count} instruments`
+        toast.success(msg)
         setIsImportDialogOpen(false)
         setImportFile(null)
         router.refresh()
       }
     } catch (error) {
-      toast.error('Error processing file')
+      console.error('Import error:', error)
+      toast.error(error instanceof Error ? error.message : 'Error processing file')
     } finally {
       setIsLoading(false)
       setImportProgress('')
     }
   }
 
-  const getAssetClassColor = (assetClass: AssetClass) => {
-    switch (assetClass) {
+  const getAssetCategoryColor = (assetCategory: AssetCategory) => {
+    switch (assetCategory) {
       case 'Stocks': return 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400'
       case 'Equity and Index Options': return 'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400'
       case 'Bonds': return 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400'
       case 'Futures': return 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400'
       case 'Forex': return 'bg-cyan-100 text-cyan-800 dark:bg-cyan-900/30 dark:text-cyan-400'
-      case 'Crypto': return 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400'
+      case 'Funds': return 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400'
+      case 'Cash': return 'bg-slate-100 text-slate-800 dark:bg-slate-900/30 dark:text-slate-400'
       default: return 'bg-gray-100 text-gray-800 dark:bg-gray-900/30 dark:text-gray-400'
     }
   }
@@ -327,7 +293,7 @@ export function InstrumentsClient({ initialInstruments, tradedInstrumentIds }: I
               <CardTitle>Instrument Universe</CardTitle>
               <CardDescription>
                 {filteredInstruments.length} of {instruments.length} instruments
-                {showTradedOnly && ` (${tradedSet.size} traded)`}
+                {showTradedOnly && ` (showing traded only)`}
               </CardDescription>
             </div>
             <div className="flex items-center gap-4">
@@ -353,14 +319,14 @@ export function InstrumentsClient({ initialInstruments, tradedInstrumentIds }: I
                 className="pl-9"
               />
             </div>
-            <Select value={filterAssetClass} onValueChange={setFilterAssetClass}>
-              <SelectTrigger className="w-[180px]">
+            <Select value={filterAssetCategory} onValueChange={setFilterAssetCategory}>
+              <SelectTrigger className="w-[200px]">
                 <Filter className="mr-2 size-4" />
-                <SelectValue placeholder="Asset Class" />
+                <SelectValue placeholder="Asset Category" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All Asset Classes</SelectItem>
-                {assetClasses.map((ac) => (
+                <SelectItem value="all">All Categories</SelectItem>
+                {assetCategories.map((ac) => (
                   <SelectItem key={ac} value={ac}>{ac}</SelectItem>
                 ))}
               </SelectContent>
@@ -396,7 +362,7 @@ export function InstrumentsClient({ initialInstruments, tradedInstrumentIds }: I
                   <TableRow>
                     <TableHead>Symbol</TableHead>
                     <TableHead>Description</TableHead>
-                    <TableHead>Asset Class</TableHead>
+                    <TableHead>Category</TableHead>
                     <TableHead>Exchange</TableHead>
                     <TableHead>Currency</TableHead>
                     <TableHead>Status</TableHead>
@@ -408,7 +374,7 @@ export function InstrumentsClient({ initialInstruments, tradedInstrumentIds }: I
                     <TableRow key={instrument.id}>
                       <TableCell className="font-mono font-medium">
                         {instrument.symbol}
-                        {tradedSet.has(instrument.id) && (
+                        {(instrument.is_traded || tradedSet.has(instrument.id)) && (
                           <Badge variant="outline" className="ml-2 text-xs">Traded</Badge>
                         )}
                       </TableCell>
@@ -416,11 +382,11 @@ export function InstrumentsClient({ initialInstruments, tradedInstrumentIds }: I
                         {instrument.description || '-'}
                       </TableCell>
                       <TableCell>
-                        <Badge variant="secondary" className={getAssetClassColor(instrument.asset_class)}>
-                          {instrument.asset_class}
+                        <Badge variant="secondary" className={getAssetCategoryColor(instrument.asset_category)}>
+                          {instrument.asset_category}
                         </Badge>
                       </TableCell>
-                      <TableCell>{instrument.exchange || '-'}</TableCell>
+                      <TableCell>{instrument.listing_exchange || '-'}</TableCell>
                       <TableCell>{instrument.currency}</TableCell>
                       <TableCell>
                         <Badge variant={instrument.is_active ? "default" : "secondary"}>
@@ -476,10 +442,9 @@ export function InstrumentsClient({ initialInstruments, tradedInstrumentIds }: I
           </DialogHeader>
           <form onSubmit={handleSubmit}>
             <Tabs defaultValue="basic" className="w-full">
-              <TabsList className="grid w-full grid-cols-3">
+              <TabsList className="grid w-full grid-cols-2">
                 <TabsTrigger value="basic">Basic Info</TabsTrigger>
                 <TabsTrigger value="identifiers">Identifiers</TabsTrigger>
-                <TabsTrigger value="classification">Classification</TabsTrigger>
               </TabsList>
               
               <TabsContent value="basic" className="space-y-4 mt-4">
@@ -498,7 +463,7 @@ export function InstrumentsClient({ initialInstruments, tradedInstrumentIds }: I
                     <Label htmlFor="con_id">Contract ID</Label>
                     <Input
                       id="con_id"
-                      placeholder="e.g., 265598"
+                      placeholder="IBKR Contract ID"
                       value={formData.con_id}
                       onChange={(e) => setFormData({ ...formData, con_id: e.target.value })}
                     />
@@ -508,30 +473,48 @@ export function InstrumentsClient({ initialInstruments, tradedInstrumentIds }: I
                   <Label htmlFor="description">Description</Label>
                   <Input
                     id="description"
-                    placeholder="e.g., Apple Inc."
+                    placeholder="e.g., Apple Inc. Common Stock"
                     value={formData.description}
                     onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                   />
                 </div>
-                <div className="grid grid-cols-3 gap-4">
+                <div className="grid grid-cols-2 gap-4">
                   <div className="grid gap-2">
-                    <Label htmlFor="asset_class">Asset Class</Label>
+                    <Label htmlFor="asset_category">Asset Category *</Label>
                     <Select 
-                      value={formData.asset_class} 
-                      onValueChange={(value: AssetClass) => setFormData({ ...formData, asset_class: value })}
+                      value={formData.asset_category} 
+                      onValueChange={(value: AssetCategory) => setFormData({ ...formData, asset_category: value })}
                     >
                       <SelectTrigger>
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        {assetClasses.map((ac) => (
+                        {assetCategories.map((ac) => (
                           <SelectItem key={ac} value={ac}>{ac}</SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
                   </div>
                   <div className="grid gap-2">
-                    <Label htmlFor="currency">Currency</Label>
+                    <Label htmlFor="listing_exchange">Listing Exchange</Label>
+                    <Select 
+                      value={formData.listing_exchange || 'other'} 
+                      onValueChange={(value) => setFormData({ ...formData, listing_exchange: value === 'other' ? '' : value })}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select exchange" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {exchanges.map((ex) => (
+                          <SelectItem key={ex} value={ex}>{ex}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <div className="grid grid-cols-3 gap-4">
+                  <div className="grid gap-2">
+                    <Label htmlFor="currency">Currency *</Label>
                     <Select 
                       value={formData.currency} 
                       onValueChange={(value) => setFormData({ ...formData, currency: value })}
@@ -551,104 +534,22 @@ export function InstrumentsClient({ initialInstruments, tradedInstrumentIds }: I
                     <Input
                       id="multiplier"
                       type="number"
-                      min="1"
                       value={formData.multiplier}
-                      onChange={(e) => setFormData({ ...formData, multiplier: parseInt(e.target.value) || 1 })}
+                      onChange={(e) => setFormData({ ...formData, multiplier: parseFloat(e.target.value) || 1 })}
                     />
                   </div>
-                </div>
-                <div className="grid grid-cols-2 gap-4">
                   <div className="grid gap-2">
-                    <Label htmlFor="exchange">Exchange</Label>
-                    <Select 
-                      value={formData.exchange} 
-                      onValueChange={(value) => setFormData({ ...formData, exchange: value })}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select exchange" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {exchanges.map((e) => (
-                          <SelectItem key={e} value={e}>{e}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="grid gap-2">
-                    <Label htmlFor="listing_exchange">Listing Exchange</Label>
+                    <Label htmlFor="issuer_country_code">Country</Label>
                     <Input
-                      id="listing_exchange"
-                      placeholder="e.g., NASDAQ"
-                      value={formData.listing_exchange}
-                      onChange={(e) => setFormData({ ...formData, listing_exchange: e.target.value })}
+                      id="issuer_country_code"
+                      placeholder="e.g., US"
+                      value={formData.issuer_country_code}
+                      onChange={(e) => setFormData({ ...formData, issuer_country_code: e.target.value.toUpperCase() })}
+                      maxLength={2}
                     />
                   </div>
                 </div>
-              </TabsContent>
-
-              <TabsContent value="identifiers" className="space-y-4 mt-4">
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="grid gap-2">
-                    <Label htmlFor="isin">ISIN</Label>
-                    <Input
-                      id="isin"
-                      placeholder="e.g., US0378331005"
-                      value={formData.isin}
-                      onChange={(e) => setFormData({ ...formData, isin: e.target.value.toUpperCase() })}
-                    />
-                  </div>
-                  <div className="grid gap-2">
-                    <Label htmlFor="cusip">CUSIP</Label>
-                    <Input
-                      id="cusip"
-                      placeholder="e.g., 037833100"
-                      value={formData.cusip}
-                      onChange={(e) => setFormData({ ...formData, cusip: e.target.value.toUpperCase() })}
-                    />
-                  </div>
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="sedol">SEDOL</Label>
-                  <Input
-                    id="sedol"
-                    placeholder="e.g., 2046251"
-                    value={formData.sedol}
-                    onChange={(e) => setFormData({ ...formData, sedol: e.target.value.toUpperCase() })}
-                  />
-                </div>
-              </TabsContent>
-
-              <TabsContent value="classification" className="space-y-4 mt-4">
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="grid gap-2">
-                    <Label htmlFor="sector">Sector</Label>
-                    <Input
-                      id="sector"
-                      placeholder="e.g., Technology"
-                      value={formData.sector}
-                      onChange={(e) => setFormData({ ...formData, sector: e.target.value })}
-                    />
-                  </div>
-                  <div className="grid gap-2">
-                    <Label htmlFor="industry">Industry</Label>
-                    <Input
-                      id="industry"
-                      placeholder="e.g., Consumer Electronics"
-                      value={formData.industry}
-                      onChange={(e) => setFormData({ ...formData, industry: e.target.value })}
-                    />
-                  </div>
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="country">Country</Label>
-                  <Input
-                    id="country"
-                    placeholder="e.g., United States"
-                    value={formData.country}
-                    onChange={(e) => setFormData({ ...formData, country: e.target.value })}
-                  />
-                </div>
-                <div className="flex items-center gap-6 pt-4">
+                <div className="flex items-center gap-6 pt-2">
                   <div className="flex items-center gap-2">
                     <Switch
                       id="is_active"
@@ -659,12 +560,44 @@ export function InstrumentsClient({ initialInstruments, tradedInstrumentIds }: I
                   </div>
                   <div className="flex items-center gap-2">
                     <Switch
-                      id="is_tradeable"
-                      checked={formData.is_tradeable}
-                      onCheckedChange={(checked) => setFormData({ ...formData, is_tradeable: checked })}
+                      id="is_traded"
+                      checked={formData.is_traded}
+                      onCheckedChange={(checked) => setFormData({ ...formData, is_traded: checked })}
                     />
-                    <Label htmlFor="is_tradeable">Tradeable</Label>
+                    <Label htmlFor="is_traded">Mark as Traded</Label>
                   </div>
+                </div>
+              </TabsContent>
+              
+              <TabsContent value="identifiers" className="space-y-4 mt-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="grid gap-2">
+                    <Label htmlFor="isin">ISIN</Label>
+                    <Input
+                      id="isin"
+                      placeholder="International Securities ID"
+                      value={formData.isin}
+                      onChange={(e) => setFormData({ ...formData, isin: e.target.value.toUpperCase() })}
+                    />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="cusip">CUSIP</Label>
+                    <Input
+                      id="cusip"
+                      placeholder="US/Canada identifier"
+                      value={formData.cusip}
+                      onChange={(e) => setFormData({ ...formData, cusip: e.target.value.toUpperCase() })}
+                    />
+                  </div>
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="figi">FIGI</Label>
+                  <Input
+                    id="figi"
+                    placeholder="Financial Instrument Global Identifier"
+                    value={formData.figi}
+                    onChange={(e) => setFormData({ ...formData, figi: e.target.value.toUpperCase() })}
+                  />
                 </div>
               </TabsContent>
             </Tabs>
@@ -681,57 +614,13 @@ export function InstrumentsClient({ initialInstruments, tradedInstrumentIds }: I
         </DialogContent>
       </Dialog>
 
-      {/* Import Dialog */}
-      <Dialog open={isImportDialogOpen} onOpenChange={setIsImportDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Import Instruments</DialogTitle>
-            <DialogDescription>
-              Upload a CSV file with instrument data from NYSE, NASDAQ, or other exchanges.
-              The file should have columns for Symbol, Name/Description, Exchange, etc.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="grid gap-4 py-4">
-            <div className="grid gap-2">
-              <Label htmlFor="import-file">CSV File</Label>
-              <Input
-                id="import-file"
-                type="file"
-                accept=".csv,.txt"
-                onChange={(e) => setImportFile(e.target.files?.[0] || null)}
-              />
-            </div>
-            {importProgress && (
-              <p className="text-sm text-muted-foreground">{importProgress}</p>
-            )}
-            <div className="text-sm text-muted-foreground">
-              <p className="font-medium mb-1">Expected columns:</p>
-              <ul className="list-disc list-inside space-y-0.5">
-                <li>Symbol or Ticker (required)</li>
-                <li>Name or Description</li>
-                <li>Exchange or Market</li>
-                <li>Sector, Industry, Country (optional)</li>
-              </ul>
-            </div>
-          </div>
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setIsImportDialogOpen(false)}>
-              Cancel
-            </Button>
-            <Button onClick={handleImport} disabled={!importFile || isLoading}>
-              {isLoading ? 'Importing...' : 'Import'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
       {/* Delete Confirmation Dialog */}
       <AlertDialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Delete Instrument</AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to delete "{deletingInstrument?.symbol}"? 
+              Are you sure you want to delete {deletingInstrument?.symbol}? 
               This action cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
@@ -743,6 +632,49 @@ export function InstrumentsClient({ initialInstruments, tradedInstrumentIds }: I
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Import Dialog */}
+      <Dialog open={isImportDialogOpen} onOpenChange={setIsImportDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Import Instruments</DialogTitle>
+            <DialogDescription>
+              Upload a file containing instrument data. Supported formats:
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="text-sm text-muted-foreground space-y-2">
+              <p><strong>NASDAQ Traded Symbols</strong> - nasdaqtraded.txt (pipe-delimited)</p>
+              <p><strong>NASDAQ Other Listed</strong> - otherlisted.txt (pipe-delimited)</p>
+              <p><strong>NYSE JSON</strong> - JSON array with normalizedTicker and instrumentName</p>
+              <p><strong>CSV</strong> - With Symbol/Ticker column header</p>
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="import-file">Select File</Label>
+              <Input
+                id="import-file"
+                type="file"
+                accept=".csv,.txt,.json"
+                onChange={(e) => setImportFile(e.target.files?.[0] || null)}
+              />
+            </div>
+            {importProgress && (
+              <div className="text-sm text-muted-foreground">{importProgress}</div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => {
+              setIsImportDialogOpen(false)
+              setImportFile(null)
+            }}>
+              Cancel
+            </Button>
+            <Button onClick={handleImport} disabled={!importFile || isLoading}>
+              {isLoading ? 'Importing...' : 'Import'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

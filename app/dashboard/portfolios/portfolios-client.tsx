@@ -2,18 +2,9 @@
 
 import { useState } from "react"
 import { useRouter } from "next/navigation"
-import { format } from "date-fns"
 import { Plus, MoreHorizontal, Pencil, Trash2, Briefcase, ArrowRight } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -41,18 +32,28 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { Badge } from "@/components/ui/badge"
-import { Switch } from "@/components/ui/switch"
 import { toast } from "sonner"
-import type { Portfolio } from "@/lib/types"
+import type { Portfolio, PortfolioStatus, Account } from "@/lib/types"
 import { createPortfolio, updatePortfolio, deletePortfolio } from "./actions"
+import Link from "next/link"
+
+const currencies = ['USD', 'SGD', 'HKD', 'EUR', 'GBP', 'JPY', 'CNY', 'AUD', 'CAD']
 
 interface PortfoliosClientProps {
   initialPortfolios: Portfolio[]
   portfolioStats: Record<string, { tradeCount: number }>
+  accounts: Account[]
 }
 
-export function PortfoliosClient({ initialPortfolios, portfolioStats }: PortfoliosClientProps) {
+export function PortfoliosClient({ initialPortfolios, portfolioStats, accounts }: PortfoliosClientProps) {
   const router = useRouter()
   const [portfolios] = useState<Portfolio[]>(initialPortfolios)
   const [isDialogOpen, setIsDialogOpen] = useState(false)
@@ -64,18 +65,20 @@ export function PortfoliosClient({ initialPortfolios, portfolioStats }: Portfoli
   const [formData, setFormData] = useState({
     name: '',
     description: '',
-    benchmark: '',
-    inception_date: '',
-    is_active: true,
+    account_id: '',
+    base_currency: 'USD',
+    strategy: '',
+    status: 'active' as PortfolioStatus,
   })
 
   const resetForm = () => {
     setFormData({
       name: '',
       description: '',
-      benchmark: '',
-      inception_date: '',
-      is_active: true,
+      account_id: '',
+      base_currency: 'USD',
+      strategy: '',
+      status: 'active',
     })
     setEditingPortfolio(null)
   }
@@ -90,9 +93,10 @@ export function PortfoliosClient({ initialPortfolios, portfolioStats }: Portfoli
     setFormData({
       name: portfolio.name,
       description: portfolio.description || '',
-      benchmark: portfolio.benchmark || '',
-      inception_date: portfolio.inception_date || '',
-      is_active: portfolio.is_active,
+      account_id: portfolio.account_id || '',
+      base_currency: portfolio.base_currency,
+      strategy: portfolio.strategy || '',
+      status: portfolio.status,
     })
     setIsDialogOpen(true)
   }
@@ -154,6 +158,15 @@ export function PortfoliosClient({ initialPortfolios, portfolioStats }: Portfoli
     }
   }
 
+  const getStatusColor = (status: PortfolioStatus) => {
+    switch (status) {
+      case 'active': return 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400'
+      case 'inactive': return 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400'
+      case 'closed': return 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400'
+      default: return 'bg-gray-100 text-gray-800 dark:bg-gray-900/30 dark:text-gray-400'
+    }
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -187,6 +200,7 @@ export function PortfoliosClient({ initialPortfolios, portfolioStats }: Portfoli
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
           {portfolios.map((portfolio) => {
             const stats = portfolioStats[portfolio.id] || { tradeCount: 0 }
+            const account = accounts.find(a => a.id === portfolio.account_id)
             return (
               <Card key={portfolio.id} className="relative">
                 <CardHeader className="pb-2">
@@ -221,37 +235,28 @@ export function PortfoliosClient({ initialPortfolios, portfolioStats }: Portfoli
                     </DropdownMenu>
                   </div>
                 </CardHeader>
-                <CardContent>
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-between text-sm">
-                      <span className="text-muted-foreground">Status</span>
-                      <Badge variant={portfolio.is_active ? "default" : "secondary"}>
-                        {portfolio.is_active ? 'Active' : 'Inactive'}
-                      </Badge>
-                    </div>
-                    {portfolio.benchmark && (
-                      <div className="flex items-center justify-between text-sm">
-                        <span className="text-muted-foreground">Benchmark</span>
-                        <span className="font-mono">{portfolio.benchmark}</span>
-                      </div>
+                <CardContent className="space-y-3">
+                  <div className="flex flex-wrap gap-2">
+                    <Badge variant="secondary" className={getStatusColor(portfolio.status)}>
+                      {portfolio.status.charAt(0).toUpperCase() + portfolio.status.slice(1)}
+                    </Badge>
+                    <Badge variant="outline">{portfolio.base_currency}</Badge>
+                    {portfolio.strategy && (
+                      <Badge variant="outline">{portfolio.strategy}</Badge>
                     )}
-                    {portfolio.inception_date && (
-                      <div className="flex items-center justify-between text-sm">
-                        <span className="text-muted-foreground">Inception</span>
-                        <span>{format(new Date(portfolio.inception_date), "MMM d, yyyy")}</span>
-                      </div>
-                    )}
-                    <div className="flex items-center justify-between text-sm">
-                      <span className="text-muted-foreground">Trades</span>
-                      <span>{stats.tradeCount}</span>
-                    </div>
-                    <Button variant="outline" size="sm" className="w-full mt-2" asChild>
-                      <a href={`/dashboard/trades?portfolio=${portfolio.id}`}>
-                        View Trades
-                        <ArrowRight className="ml-2 size-3" />
-                      </a>
-                    </Button>
                   </div>
+                  <div className="text-sm text-muted-foreground space-y-1">
+                    {account && (
+                      <p>Account: {account.account_name}</p>
+                    )}
+                    <p>{stats.tradeCount} trade{stats.tradeCount !== 1 ? 's' : ''}</p>
+                  </div>
+                  <Link 
+                    href={`/dashboard/trades?portfolio=${portfolio.id}`}
+                    className="flex items-center text-sm text-primary hover:underline"
+                  >
+                    View trades <ArrowRight className="ml-1 size-4" />
+                  </Link>
                 </CardContent>
               </Card>
             )
@@ -267,16 +272,16 @@ export function PortfoliosClient({ initialPortfolios, portfolioStats }: Portfoli
             <DialogDescription>
               {editingPortfolio 
                 ? 'Update the portfolio information below.' 
-                : 'Create a portfolio to organize your trades and track performance.'}
+                : 'Create a portfolio to organize your trades by strategy.'}
             </DialogDescription>
           </DialogHeader>
           <form onSubmit={handleSubmit}>
             <div className="grid gap-4 py-4">
               <div className="grid gap-2">
-                <Label htmlFor="name">Portfolio Name *</Label>
+                <Label htmlFor="name">Name *</Label>
                 <Input
                   id="name"
-                  placeholder="e.g., Growth Strategy"
+                  placeholder="e.g., Tech Growth"
                   value={formData.name}
                   onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                   required
@@ -286,7 +291,7 @@ export function PortfoliosClient({ initialPortfolios, portfolioStats }: Portfoli
                 <Label htmlFor="description">Description</Label>
                 <Textarea
                   id="description"
-                  placeholder="Describe the portfolio strategy or purpose..."
+                  placeholder="Describe the portfolio's purpose or strategy..."
                   value={formData.description}
                   onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                   rows={3}
@@ -294,31 +299,67 @@ export function PortfoliosClient({ initialPortfolios, portfolioStats }: Portfoli
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="grid gap-2">
-                  <Label htmlFor="benchmark">Benchmark</Label>
+                  <Label htmlFor="account_id">Linked Account</Label>
+                  <Select 
+                    value={formData.account_id || 'none'} 
+                    onValueChange={(value) => setFormData({ ...formData, account_id: value === 'none' ? '' : value })}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select account" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">No linked account</SelectItem>
+                      {accounts.map((account) => (
+                        <SelectItem key={account.id} value={account.id}>
+                          {account.account_name} ({account.platform})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="base_currency">Base Currency</Label>
+                  <Select 
+                    value={formData.base_currency} 
+                    onValueChange={(value) => setFormData({ ...formData, base_currency: value })}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {currencies.map((c) => (
+                        <SelectItem key={c} value={c}>{c}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="grid gap-2">
+                  <Label htmlFor="strategy">Strategy</Label>
                   <Input
-                    id="benchmark"
-                    placeholder="e.g., SPY, QQQ"
-                    value={formData.benchmark}
-                    onChange={(e) => setFormData({ ...formData, benchmark: e.target.value })}
+                    id="strategy"
+                    placeholder="e.g., Long-term, Swing"
+                    value={formData.strategy}
+                    onChange={(e) => setFormData({ ...formData, strategy: e.target.value })}
                   />
                 </div>
                 <div className="grid gap-2">
-                  <Label htmlFor="inception_date">Inception Date</Label>
-                  <Input
-                    id="inception_date"
-                    type="date"
-                    value={formData.inception_date}
-                    onChange={(e) => setFormData({ ...formData, inception_date: e.target.value })}
-                  />
+                  <Label htmlFor="status">Status</Label>
+                  <Select 
+                    value={formData.status} 
+                    onValueChange={(value: PortfolioStatus) => setFormData({ ...formData, status: value })}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="active">Active</SelectItem>
+                      <SelectItem value="inactive">Inactive</SelectItem>
+                      <SelectItem value="closed">Closed</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <Switch
-                  id="is_active"
-                  checked={formData.is_active}
-                  onCheckedChange={(checked) => setFormData({ ...formData, is_active: checked })}
-                />
-                <Label htmlFor="is_active">Active</Label>
               </div>
             </div>
             <DialogFooter>

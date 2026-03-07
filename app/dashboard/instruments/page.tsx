@@ -27,8 +27,8 @@ async function getTradedInstrumentIds() {
     return []
   }
   
-  // Get unique instrument IDs
-  const uniqueIds = [...new Set(data?.map(t => t.instrument_id) || [])]
+  // Get unique instrument IDs (filter out nulls)
+  const uniqueIds = [...new Set(data?.map(t => t.instrument_id).filter((id): id is string => id !== null) || [])]
   return uniqueIds
 }
 

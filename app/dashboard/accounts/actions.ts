@@ -10,7 +10,7 @@ interface AccountFormData {
   platform: Platform
   account_type: string
   base_currency: string
-  is_active: boolean
+  status: 'active' | 'inactive' | 'closed'
 }
 
 export async function createAccount(data: AccountFormData) {
@@ -22,7 +22,7 @@ export async function createAccount(data: AccountFormData) {
     platform: data.platform,
     account_type: data.account_type || null,
     base_currency: data.base_currency,
-    is_active: data.is_active,
+    status: data.status || 'active',
   })
 
   if (error) {
@@ -45,7 +45,7 @@ export async function updateAccount(id: string, data: AccountFormData) {
       platform: data.platform,
       account_type: data.account_type || null,
       base_currency: data.base_currency,
-      is_active: data.is_active,
+      status: data.status || 'active',
       updated_at: new Date().toISOString(),
     })
     .eq('id', id)

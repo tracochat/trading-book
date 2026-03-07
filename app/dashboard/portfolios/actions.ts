@@ -5,10 +5,11 @@ import { revalidatePath } from "next/cache"
 
 interface PortfolioFormData {
   name: string
-  description: string
-  benchmark: string
-  inception_date: string
-  is_active: boolean
+  description?: string
+  account_id?: string
+  base_currency: string
+  strategy?: string
+  status: 'active' | 'inactive' | 'closed'
 }
 
 export async function createPortfolio(data: PortfolioFormData) {
@@ -17,9 +18,10 @@ export async function createPortfolio(data: PortfolioFormData) {
   const { error } = await supabase.from('portfolios').insert({
     name: data.name,
     description: data.description || null,
-    benchmark: data.benchmark || null,
-    inception_date: data.inception_date || null,
-    is_active: data.is_active,
+    account_id: data.account_id || null,
+    base_currency: data.base_currency || 'USD',
+    strategy: data.strategy || null,
+    status: data.status || 'active',
   })
 
   if (error) {
@@ -39,9 +41,10 @@ export async function updatePortfolio(id: string, data: PortfolioFormData) {
     .update({
       name: data.name,
       description: data.description || null,
-      benchmark: data.benchmark || null,
-      inception_date: data.inception_date || null,
-      is_active: data.is_active,
+      account_id: data.account_id || null,
+      base_currency: data.base_currency || 'USD',
+      strategy: data.strategy || null,
+      status: data.status || 'active',
       updated_at: new Date().toISOString(),
     })
     .eq('id', id)

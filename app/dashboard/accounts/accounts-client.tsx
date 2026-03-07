@@ -73,7 +73,7 @@ export function AccountsClient({ initialAccounts }: AccountsClientProps) {
     platform: 'IBKR' as Platform,
     account_type: '',
     base_currency: 'USD',
-    is_active: true,
+    status: 'active' as 'active' | 'inactive' | 'closed',
   })
 
   const resetForm = () => {
@@ -83,7 +83,7 @@ export function AccountsClient({ initialAccounts }: AccountsClientProps) {
       platform: 'IBKR',
       account_type: '',
       base_currency: 'USD',
-      is_active: true,
+      status: 'active',
     })
     setEditingAccount(null)
   }
@@ -101,7 +101,7 @@ export function AccountsClient({ initialAccounts }: AccountsClientProps) {
       platform: account.platform,
       account_type: account.account_type || '',
       base_currency: account.base_currency,
-      is_active: account.is_active,
+      status: account.status || 'active',
     })
     setIsDialogOpen(true)
   }
@@ -233,8 +233,8 @@ export function AccountsClient({ initialAccounts }: AccountsClientProps) {
                     <TableCell>{account.account_type || '-'}</TableCell>
                     <TableCell>{account.base_currency}</TableCell>
                     <TableCell>
-                      <Badge variant={account.is_active ? "default" : "secondary"}>
-                        {account.is_active ? 'Active' : 'Inactive'}
+                      <Badge variant={account.status === 'active' ? "default" : "secondary"}>
+                        {account.status === 'active' ? 'Active' : account.status === 'inactive' ? 'Inactive' : 'Closed'}
                       </Badge>
                     </TableCell>
                     <TableCell>
