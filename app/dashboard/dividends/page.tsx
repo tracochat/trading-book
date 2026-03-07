@@ -18,7 +18,7 @@ async function getDividends() {
     .from(dividends)
     .leftJoin(instruments, sql`${instruments.id} = ${dividends.instrument_id}`)
     .leftJoin(accounts, sql`${accounts.id} = ${dividends.account_id}`)
-    .orderBy(dividends.pay_date, 'desc')
+    .orderBy(sql`${dividends.pay_date} desc`)
 
   return rows.map(r => ({
     ...r.dividend,
@@ -36,11 +36,13 @@ export default async function DividendsPage() {
 
   const totalGross = dividends.reduce((sum, d) => sum + d.gross_amount, 0)
   const totalNet = dividends.reduce((sum, d) => sum + d.net_amount, 0)
-  const totalWithholding = dividends.reduce((sum, d) => sum + d.withholding_tax, 0)
+  const totalWithholding = dividends.reduce((sum, d) => sum + (d.tax || 0), 0)
 
   // Group by year
   const byYear = dividends.reduce((acc, d) => {
-    const year = new Date(d.pay_date || d.ex_date).getFullYear()
+    const effectiveDate = d.pay_date || d.ex_date
+    if (!effectiveDate) return acc
+    const year = new Date(effectiveDate).getFullYear()
     if (!acc[year]) acc[year] = { gross: 0, net: 0, count: 0 }
     acc[year].gross += d.gross_amount
     acc[year].net += d.net_amount
@@ -159,17 +161,19 @@ export default async function DividendsPage() {
                   {dividends.map((dividend) => (
                     <TableRow key={dividend.id}>
                       <TableCell className="font-mono text-sm">
-                        {format(new Date(dividend.pay_date || dividend.ex_date), "yyyy-MM-dd")}
+                        {dividend.pay_date || dividend.ex_date
+                          ? format(new Date(dividend.pay_date || dividend.ex_date || ''), "yyyy-MM-dd")
+                          : '-'}
                       </TableCell>
                       <TableCell>
-                        <span className="font-medium">{dividend.instrument?.symbol}</span>
+                        <span className="font-medium">{dividend.instrument?.symbol || dividend.symbol}</span>
                       </TableCell>
                       <TableCell>{dividend.account?.account_name || '-'}</TableCell>
                       <TableCell className="text-right font-mono">
                         {formatCurrency(dividend.gross_amount, dividend.currency)}
                       </TableCell>
                       <TableCell className="text-right font-mono text-red-600">
-                        {dividend.withholding_tax > 0 ? `-${formatCurrency(dividend.withholding_tax, dividend.currency)}` : '-'}
+                        {(dividend.tax || 0) > 0 ? `-${formatCurrency(dividend.tax || 0, dividend.currency)}` : '-'}
                       </TableCell>
                       <TableCell className="text-right font-mono text-green-600">
                         {formatCurrency(dividend.net_amount, dividend.currency)}

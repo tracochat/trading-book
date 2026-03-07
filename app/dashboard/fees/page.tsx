@@ -19,7 +19,7 @@ async function getTransactionFees() {
     .select({ fee: transactionFees, account: accounts })
     .from(transactionFees)
     .leftJoin(accounts, sql`${accounts.id} = ${transactionFees.account_id}`)
-    .orderBy(transactionFees.fee_date, 'desc')
+    .orderBy(sql`${transactionFees.fee_date} desc`)
     .limit(200)
 
   return rows.map(r => ({ ...r.fee, account: r.account }))
@@ -107,7 +107,7 @@ export default async function FeesPage() {
                   {fees.map((fee) => (
                     <TableRow key={fee.id}>
                       <TableCell className="font-mono">
-                        {format(new Date(fee.date), 'yyyy-MM-dd')}
+                        {format(new Date(fee.fee_date), 'yyyy-MM-dd')}
                       </TableCell>
                       <TableCell>{fee.account?.account_name || '-'}</TableCell>
                       <TableCell className="capitalize">{fee.fee_type}</TableCell>

@@ -22,18 +22,18 @@ async function getReconciliationLogs(importId?: string) {
       rl: reconLog,
       import: {
         filename: activityImports.file_name,
-        account: { account_name: accountsTable.account_name },
+        account: { account_name: accountsTable.account_name } as any,
       },
     })
     .from(reconLog)
     .leftJoin(activityImports, sql`${activityImports.id} = ${reconLog.import_id}`)
     .leftJoin(accountsTable, sql`${accountsTable.id} = ${activityImports.account_id}`)
-    .orderBy(reconLog.created_at, 'desc')
+    .orderBy(sql`${reconLog.created_at} desc`)
     .limit(100)
   const rows = importId
-    ? await base.where(reconLog.import_id.eq(importId))
+    ? await base.where(sql`${reconLog.import_id} = ${importId}`)
     : await base
-  return rows.map(r => ({ ...r.rl, import: r.import }))
+  return rows.map(r => ({ ...(r.rl as any), import: r.import }))
 }
 
 async function getRecentImports() {
@@ -41,7 +41,7 @@ async function getRecentImports() {
     .select({ imp: activityImports, account: { account_name: accountsTable.account_name } })
     .from(activityImports)
     .leftJoin(accountsTable, sql`${accountsTable.id} = ${activityImports.account_id}`)
-    .orderBy(activityImports.imported_at, 'desc')
+    .orderBy(sql`${activityImports.imported_at} desc`)
     .limit(10)
 
   return rows.map(r => ({ ...r.imp, account: r.account }))
@@ -172,9 +172,9 @@ export default async function ReconciliationPage({ searchParams }: PageProps) {
                     importId === imp.id ? 'border-primary bg-muted/50' : ''
                   }`}
                 >
-                  <div className="font-medium text-sm truncate">{imp.filename}</div>
+                  <div className="font-medium text-sm truncate">{imp.file_name}</div>
                   <div className="text-xs text-muted-foreground">
-                    {imp.account?.account_name} • {format(new Date(imp.created_at), "MMM d")}
+                    {imp.account?.account_name} • {imp.imported_at ? format(new Date(imp.imported_at), "MMM d") : '-'}
                   </div>
                   <div className="text-xs text-muted-foreground mt-1">
                     {imp.records_imported} records

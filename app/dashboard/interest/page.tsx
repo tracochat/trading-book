@@ -19,7 +19,7 @@ async function getInterest() {
     .select({ item: interest, account: accounts })
     .from(interest)
     .leftJoin(accounts, sql`${accounts.id} = ${interest.account_id}`)
-    .orderBy(interest.interest_date, 'desc')
+    .orderBy(sql`${interest.interest_date} desc`)
     .limit(200)
 
   return rows.map(r => ({ ...r.item, account: r.account }))
@@ -111,7 +111,7 @@ export default async function InterestPage() {
                   {interest.map((item) => (
                     <TableRow key={item.id}>
                       <TableCell className="font-mono">
-                        {format(new Date(item.date), 'yyyy-MM-dd')}
+                        {format(new Date(item.interest_date), 'yyyy-MM-dd')}
                       </TableCell>
                       <TableCell>{item.account?.account_name || '-'}</TableCell>
                       <TableCell className="max-w-xs truncate">{item.description}</TableCell>

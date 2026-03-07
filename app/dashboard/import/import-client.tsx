@@ -37,22 +37,16 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { toast } from "sonner"
 import type { Account, ActivityImport } from "@/lib/types"
-import { parseIBKRReport, createActivityImport, processImportedData } from "./actions"
+import {
+  parseIBKRReport,
+  createActivityImport,
+  processImportedData,
+  type ParsedImportPayload,
+} from "./actions"
 
 interface ImportClientProps {
   accounts: Pick<Account, 'id' | 'account_id' | 'account_name' | 'platform'>[]
   recentImports: (ActivityImport & { account?: Pick<Account, 'account_id' | 'account_name' | 'platform'> })[]
-}
-
-interface ParsedData {
-  trades: any[]
-  dividends: any[]
-  deposits: any[]
-  fees: any[]
-  interest: any[]
-  withholdingTax: any[]
-  forexBalances: any[]
-  openPositions: any[]
 }
 
 export function ImportClient({ accounts, recentImports }: ImportClientProps) {
@@ -63,9 +57,10 @@ export function ImportClient({ accounts, recentImports }: ImportClientProps) {
   const [isLoading, setIsLoading] = useState(false)
   const [parseProgress, setParseProgress] = useState(0)
   const [parseStatus, setParseStatus] = useState<string>('')
-  const [parsedData, setParsedData] = useState<ParsedData | null>(null)
+  const [parsedData, setParsedData] = useState<ParsedImportPayload | null>(null)
   const [parseErrors, setParseErrors] = useState<string[]>([])
   const [step, setStep] = useState<'upload' | 'preview' | 'importing' | 'complete'>('upload')
+  const [importSummary, setImportSummary] = useState<string>('')
 
   const resetState = () => {
     setSelectedAccount('')
@@ -75,6 +70,7 @@ export function ImportClient({ accounts, recentImports }: ImportClientProps) {
     setParsedData(null)
     setParseErrors([])
     setStep('upload')
+    setImportSummary('')
   }
 
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -94,9 +90,9 @@ export function ImportClient({ accounts, recentImports }: ImportClientProps) {
     try {
       const text = await importFile.text()
       setParseProgress(30)
-      setParseStatus('Parsing IBKR report...')
+      setParseStatus('Detecting platform and extracting sections...')
       
-      const result = await parseIBKRReport(text, selectedAccount)
+      const result = await parseIBKRReport(text)
       
       setParseProgress(100)
       
@@ -128,10 +124,13 @@ export function ImportClient({ accounts, recentImports }: ImportClientProps) {
     try {
       // Create import record
       setParseProgress(10)
+      setParseStatus('Creating import record...')
       const importResult = await createActivityImport({
         account_id: selectedAccount,
-        filename: importFile.name,
-        file_type: 'IBKR_HTML',
+        file_name: importFile.name,
+        platform: parsedData.platform,
+        period_start: parsedData.periodStart,
+        period_end: parsedData.periodEnd,
       })
 
       if (importResult.error) {
@@ -142,7 +141,7 @@ export function ImportClient({ accounts, recentImports }: ImportClientProps) {
 
       // Process the data
       setParseProgress(30)
-      setParseStatus('Importing trades...')
+      setParseStatus('Importing parsed sections...')
       
       const processResult = await processImportedData(importId!, parsedData, selectedAccount)
       
@@ -153,6 +152,7 @@ export function ImportClient({ accounts, recentImports }: ImportClientProps) {
         toast.error('Some errors occurred during import')
       } else {
         setStep('complete')
+        setImportSummary(processResult.summary)
         toast.success(`Import complete: ${processResult.summary}`)
       }
       
@@ -207,9 +207,7 @@ export function ImportClient({ accounts, recentImports }: ImportClientProps) {
           <CardContent>
             <ul className="text-sm text-muted-foreground space-y-1">
               <li>• IBKR Activity Statement (HTML)</li>
-              <li>• IBKR Flex Query (CSV)</li>
-              <li>• Futu Activity Report (CSV)</li>
-              <li>• Tiger Trade History (CSV)</li>
+              <li>• Other broker formats are not implemented yet</li>
             </ul>
           </CardContent>
         </Card>
@@ -277,19 +275,19 @@ export function ImportClient({ accounts, recentImports }: ImportClientProps) {
                 {recentImports.map((imp) => (
                   <TableRow key={imp.id}>
                     <TableCell className="font-mono text-sm">
-                      {format(new Date(imp.created_at), "yyyy-MM-dd HH:mm")}
+                      {format(new Date(imp.imported_at), "yyyy-MM-dd HH:mm")}
                     </TableCell>
                     <TableCell className="max-w-[200px] truncate">
-                      {imp.filename}
+                      {imp.file_name}
                     </TableCell>
                     <TableCell>
                       {imp.account?.account_name || '-'}
                     </TableCell>
                     <TableCell>{imp.records_imported}</TableCell>
                     <TableCell>
-                      <Badge variant="secondary" className={getStatusColor(imp.status)}>
-                        {getStatusIcon(imp.status)}
-                        <span className="ml-1">{imp.status}</span>
+                      <Badge variant="secondary" className={getStatusColor(imp.import_status)}>
+                        {getStatusIcon(imp.import_status)}
+                        <span className="ml-1">{imp.import_status}</span>
                       </Badge>
                     </TableCell>
                     <TableCell>
@@ -374,68 +372,56 @@ export function ImportClient({ accounts, recentImports }: ImportClientProps) {
                 <CheckCircle2 className="size-4" />
                 <AlertTitle>File Parsed Successfully</AlertTitle>
                 <AlertDescription>
-                  Review the data below before importing.
+                  {parsedData.platform} statement detected. Review the extracted sections before importing.
                 </AlertDescription>
               </Alert>
 
+              <div className="mb-4 grid gap-3 sm:grid-cols-3">
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-sm font-medium">Platform</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-lg font-semibold">{parsedData.platform}</div>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-sm font-medium">Period Start</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-lg font-semibold">{parsedData.periodStart || '-'}</div>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-sm font-medium">Period End</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-lg font-semibold">{parsedData.periodEnd || parsedData.reportDate || '-'}</div>
+                  </CardContent>
+                </Card>
+              </div>
+
               <ScrollArea className="h-[300px] rounded-md border p-4">
                 <div className="space-y-4">
-                  {parsedData.trades.length > 0 && (
-                    <div>
-                      <h4 className="font-medium mb-2">Trades ({parsedData.trades.length})</h4>
-                      <div className="text-sm text-muted-foreground">
-                        {parsedData.trades.slice(0, 5).map((t, i) => (
-                          <p key={i}>{t.trade_date} - {t.symbol} - {t.trade_type} {t.quantity} @ {t.price}</p>
-                        ))}
-                        {parsedData.trades.length > 5 && (
-                          <p className="text-xs mt-1">...and {parsedData.trades.length - 5} more</p>
-                        )}
+                  {parsedData.overview.map((section) => (
+                    <div key={section.key}>
+                      <div className="mb-2 flex items-center justify-between gap-3">
+                        <h4 className="font-medium">{section.title}</h4>
+                        <Badge variant="outline">{section.count}</Badge>
                       </div>
+                      {section.preview.length > 0 ? (
+                        <div className="space-y-1 text-sm text-muted-foreground">
+                          {section.preview.map((line, index) => (
+                            <p key={index}>{line}</p>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-sm text-muted-foreground">No records found in this section.</p>
+                      )}
                     </div>
-                  )}
-                  
-                  {parsedData.dividends.length > 0 && (
-                    <div>
-                      <h4 className="font-medium mb-2">Dividends ({parsedData.dividends.length})</h4>
-                      <div className="text-sm text-muted-foreground">
-                        {parsedData.dividends.slice(0, 3).map((d, i) => (
-                          <p key={i}>{d.pay_date} - {d.symbol} - {d.currency} {d.gross_amount}</p>
-                        ))}
-                        {parsedData.dividends.length > 3 && (
-                          <p className="text-xs mt-1">...and {parsedData.dividends.length - 3} more</p>
-                        )}
-                      </div>
-                    </div>
-                  )}
-
-                  {parsedData.deposits.length > 0 && (
-                    <div>
-                      <h4 className="font-medium mb-2">Deposits & Withdrawals ({parsedData.deposits.length})</h4>
-                      <div className="text-sm text-muted-foreground">
-                        {parsedData.deposits.slice(0, 3).map((d, i) => (
-                          <p key={i}>{d.transaction_date} - {d.transaction_type} - {d.currency} {d.amount}</p>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {parsedData.fees.length > 0 && (
-                    <div>
-                      <h4 className="font-medium mb-2">Fees ({parsedData.fees.length})</h4>
-                    </div>
-                  )}
-
-                  {parsedData.interest.length > 0 && (
-                    <div>
-                      <h4 className="font-medium mb-2">Interest ({parsedData.interest.length})</h4>
-                    </div>
-                  )}
-
-                  {parsedData.withholdingTax.length > 0 && (
-                    <div>
-                      <h4 className="font-medium mb-2">Withholding Tax ({parsedData.withholdingTax.length})</h4>
-                    </div>
-                  )}
+                  ))}
                 </div>
               </ScrollArea>
             </div>
@@ -453,7 +439,7 @@ export function ImportClient({ accounts, recentImports }: ImportClientProps) {
               <CheckCircle2 className="size-12 text-green-500 mx-auto mb-4" />
               <h3 className="text-lg font-medium">Import Complete</h3>
               <p className="text-muted-foreground mt-1">
-                Your data has been imported successfully.
+                {importSummary || 'Your data has been imported successfully.'}
               </p>
             </div>
           )}

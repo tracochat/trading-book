@@ -19,7 +19,7 @@ async function getForexBalances() {
     .select({ bal: forexBalances, account: accounts })
     .from(forexBalances)
     .leftJoin(accounts, sql`${accounts.id} = ${forexBalances.account_id}`)
-    .orderBy(forexBalances.as_of_date, 'desc')
+    .orderBy(sql`${forexBalances.as_of_date} desc`)
     .limit(200)
 
   return rows.map(r => ({ ...r.bal, account: r.account }))
@@ -46,7 +46,7 @@ export default async function ForexPage() {
   })
 
   const currencies = Object.values(latestByCurrency)
-  const totalUSD = currencies.reduce((sum, b) => sum + (b.usd_value || 0), 0)
+  const totalBaseValue = currencies.reduce((sum, b) => sum + (b.value || 0), 0)
 
   return (
     <div className="space-y-6">
@@ -60,12 +60,12 @@ export default async function ForexPage() {
       <div className="grid gap-4 md:grid-cols-4">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total (USD)</CardTitle>
+            <CardTitle className="text-sm font-medium">Total Base Value</CardTitle>
             <DollarSign className="size-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">
-              {formatCurrency(totalUSD, 'USD')}
+              {formatCurrency(totalBaseValue, 'USD')}
             </div>
             <p className="text-xs text-muted-foreground">
               Across {currencies.length} currencies
@@ -80,10 +80,10 @@ export default async function ForexPage() {
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold">
-                {formatCurrency(balance.balance, balance.currency)}
+                {formatCurrency(balance.quantity, balance.currency)}
               </div>
               <p className="text-xs text-muted-foreground">
-                {balance.usd_value ? formatCurrency(balance.usd_value, 'USD') : '-'} USD
+                {balance.value ? formatCurrency(balance.value, 'USD') : '-'} base value
               </p>
             </CardContent>
           </Card>
@@ -103,8 +103,8 @@ export default async function ForexPage() {
                   <TableRow>
                     <TableHead>Currency</TableHead>
                     <TableHead>Account</TableHead>
-                    <TableHead className="text-right">Balance</TableHead>
-                    <TableHead className="text-right">USD Value</TableHead>
+                    <TableHead className="text-right">Quantity</TableHead>
+                    <TableHead className="text-right">Base Value</TableHead>
                     <TableHead className="text-right">FX Rate</TableHead>
                     <TableHead>As Of</TableHead>
                   </TableRow>
@@ -115,13 +115,13 @@ export default async function ForexPage() {
                       <TableCell className="font-medium">{balance.currency}</TableCell>
                       <TableCell>{balance.account?.account_name || '-'}</TableCell>
                       <TableCell className="text-right font-mono">
-                        {formatCurrency(balance.balance, balance.currency)}
+                        {formatCurrency(balance.quantity, balance.currency)}
                       </TableCell>
                       <TableCell className="text-right font-mono">
-                        {balance.usd_value ? formatCurrency(balance.usd_value, 'USD') : '-'}
+                        {balance.value ? formatCurrency(balance.value, 'USD') : '-'}
                       </TableCell>
                       <TableCell className="text-right font-mono">
-                        {balance.fx_rate?.toFixed(4) || '-'}
+                        {balance.fx_rate_to_base?.toFixed(4) || '-'}
                       </TableCell>
                       <TableCell className="font-mono">
                         {format(new Date(balance.as_of_date), 'yyyy-MM-dd')}
@@ -157,8 +157,8 @@ export default async function ForexPage() {
                     <TableHead>Date</TableHead>
                     <TableHead>Account</TableHead>
                     <TableHead>Currency</TableHead>
-                    <TableHead className="text-right">Balance</TableHead>
-                    <TableHead className="text-right">USD Value</TableHead>
+                    <TableHead className="text-right">Quantity</TableHead>
+                    <TableHead className="text-right">Base Value</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -170,10 +170,10 @@ export default async function ForexPage() {
                       <TableCell>{balance.account?.account_name || '-'}</TableCell>
                       <TableCell className="font-medium">{balance.currency}</TableCell>
                       <TableCell className="text-right font-mono">
-                        {formatCurrency(balance.balance, balance.currency)}
+                        {formatCurrency(balance.quantity, balance.currency)}
                       </TableCell>
                       <TableCell className="text-right font-mono">
-                        {balance.usd_value ? formatCurrency(balance.usd_value, 'USD') : '-'}
+                        {balance.value ? formatCurrency(balance.value, 'USD') : '-'}
                       </TableCell>
                     </TableRow>
                   ))}

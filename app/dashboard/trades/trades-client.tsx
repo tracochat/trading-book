@@ -426,10 +426,20 @@ export function TradesClient({ initialTrades, accounts, instruments, portfolios 
                       <TableCell className="text-right font-mono">
                         {trade.quantity.toLocaleString()}
                       </TableCell>
-                      <TableCell className="text-right font-mono">
+                      <TableCell
+                        className={cn(
+                          "text-right font-mono",
+                          trade.price < 0 ? "text-red-600" : "text-green-600",
+                        )}
+                      >
                         {formatCurrency(trade.price, trade.currency)}
                       </TableCell>
-                      <TableCell className="text-right font-mono">
+                      <TableCell
+                        className={cn(
+                          "text-right font-mono",
+                          trade.net_amount < 0 ? "text-red-600" : "text-green-600",
+                        )}
+                      >
                         {formatCurrency(trade.net_amount, trade.currency)}
                       </TableCell>
                       <TableCell>

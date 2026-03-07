@@ -25,7 +25,7 @@ async function getWithholdingTax() {
       .from(withholdingTax)
       .leftJoin(accountsTable, sql`${accountsTable.id} = ${withholdingTax.account_id}`)
       .leftJoin(instrumentsTable, sql`${instrumentsTable.id} = ${withholdingTax.instrument_id}`)
-      .orderBy(withholdingTax.tax_date, 'desc')
+      .orderBy(sql`${withholdingTax.tax_date} desc`)
       .limit(200)
     return rows.map(r => ({ ...r.wt, account: r.account, instrument: r.instrument }))
   } catch (error) {
@@ -43,11 +43,10 @@ export default async function WithholdingTaxPage() {
   
   const totalTax = taxes.reduce((sum, t) => sum + Math.abs(t.amount), 0)
 
-  // Group by country
-  const byCountry: Record<string, number> = {}
+  const byType: Record<string, number> = {}
   taxes.forEach(t => {
-    const country = t.country || 'Unknown'
-    byCountry[country] = (byCountry[country] || 0) + Math.abs(t.amount)
+    const taxType = t.tax_type || 'Withholding Tax'
+    byType[taxType] = (byType[taxType] || 0) + Math.abs(t.amount)
   })
 
   return (
@@ -74,10 +73,10 @@ export default async function WithholdingTaxPage() {
             </p>
           </CardContent>
         </Card>
-        {Object.entries(byCountry).slice(0, 2).map(([country, amount]) => (
-          <Card key={country}>
+        {Object.entries(byType).slice(0, 2).map(([taxType, amount]) => (
+          <Card key={taxType}>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">{country}</CardTitle>
+              <CardTitle className="text-sm font-medium">{taxType}</CardTitle>
               <FileText className="size-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
@@ -106,7 +105,7 @@ export default async function WithholdingTaxPage() {
                     <TableHead>Date</TableHead>
                     <TableHead>Account</TableHead>
                     <TableHead>Symbol</TableHead>
-                    <TableHead>Country</TableHead>
+                    <TableHead>Type</TableHead>
                     <TableHead>Description</TableHead>
                     <TableHead className="text-right">Amount</TableHead>
                     <TableHead>Currency</TableHead>
@@ -116,11 +115,11 @@ export default async function WithholdingTaxPage() {
                   {taxes.map((tax) => (
                     <TableRow key={tax.id}>
                       <TableCell className="font-mono">
-                        {format(new Date(tax.date), 'yyyy-MM-dd')}
+                        {format(new Date(tax.tax_date), 'yyyy-MM-dd')}
                       </TableCell>
                       <TableCell>{tax.account?.account_name || '-'}</TableCell>
-                      <TableCell className="font-medium">{tax.instrument?.symbol || '-'}</TableCell>
-                      <TableCell>{tax.country || '-'}</TableCell>
+                      <TableCell className="font-medium">{tax.instrument?.symbol || tax.symbol || '-'}</TableCell>
+                      <TableCell>{tax.tax_type || '-'}</TableCell>
                       <TableCell className="max-w-xs truncate">{tax.description}</TableCell>
                       <TableCell className="text-right font-mono text-destructive">
                         {formatCurrency(tax.amount, tax.currency)}

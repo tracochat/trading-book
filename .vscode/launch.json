@@ -8,7 +8,7 @@
       "type": "pwa-node",
       "request": "launch",
       "name": "Next.js: Debug Server",
-      "runtimeExecutable": "npm",
+      "runtimeExecutable": "pnpm",
       "runtimeArgs": ["run", "dev"],
       "port": 9229,
       "cwd": "${workspaceFolder}",
@@ -24,7 +24,17 @@
       "url": "http://localhost:3000",
       "webRoot": "${workspaceFolder}",
       "sourceMaps": true,
-      "preLaunchTask": "npm: dev"
+      "preLaunchTask": "pnpm: dev"
+    },
+    {
+      "type": "pwa-node",
+      "request": "launch",
+      "name": "Run Vitest",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["run", "test"],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "skipFiles": ["<node_internals>/**"]
     }
   ]
 }

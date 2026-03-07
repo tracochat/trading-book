@@ -23,7 +23,7 @@ async function getOpenPositions() {
     .leftJoin(instruments, sql`${instruments.id} = ${openPositions.instrument_id}`)
     .leftJoin(accounts, sql`${accounts.id} = ${openPositions.account_id}`)
     .leftJoin(portfolios, sql`${portfolios.id} = ${openPositions.portfolio_id}`)
-    .orderBy(openPositions.as_of_date, 'desc')
+    .orderBy(sql`${openPositions.as_of_date} desc`)
 
   // flatten joined results
   return rows.map(r => ({
@@ -125,10 +125,10 @@ export default async function PositionsPage() {
                     <TableRow key={position.id}>
                       <TableCell>
                         <div>
-                          <span className="font-medium">{position.instrument?.symbol}</span>
-                          {position.instrument?.description && (
+                          <span className="font-medium">{position.instrument?.symbol || position.symbol}</span>
+                          {(position.instrument?.description || position.description) && (
                             <p className="text-xs text-muted-foreground truncate max-w-[150px]">
-                              {position.instrument.description}
+                              {position.instrument?.description || position.description}
                             </p>
                           )}
                         </div>
@@ -139,10 +139,10 @@ export default async function PositionsPage() {
                         {position.quantity.toLocaleString()}
                       </TableCell>
                       <TableCell className="text-right font-mono">
-                        {formatCurrency(position.cost_basis, position.currency)}
+                        {formatCurrency(position.cost_basis_money, position.currency)}
                       </TableCell>
                       <TableCell className="text-right font-mono">
-                        {formatCurrency(position.market_price, position.currency)}
+                        {formatCurrency(position.close_price, position.currency)}
                       </TableCell>
                       <TableCell className="text-right font-mono">
                         {formatCurrency(position.market_value, position.currency)}
