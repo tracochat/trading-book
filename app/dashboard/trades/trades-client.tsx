@@ -9,28 +9,10 @@ import {
   Pencil,
   Trash2,
   ArrowLeftRight,
-  Search,
-  Filter,
-  Calendar,
-  Download,
   Upload,
 } from 'lucide-react'
-import {
-  flexRender,
-  getCoreRowModel,
-  useReactTable,
-  ColumnDef,
-} from '@tanstack/react-table'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -65,12 +47,18 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Badge } from '@/components/ui/badge'
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
-import { Calendar as CalendarComponent } from '@/components/ui/calendar'
 import { toast } from 'sonner'
 import type { Trade, TradeType, Account, Instrument, Portfolio } from '@/lib/types'
 import { createTrade, updateTrade, deleteTrade } from './actions'
 import { cn } from '@/lib/utils'
+
+// Import DataGrid components
+import { DataGridProvider } from '@/components/data-grid/hooks/use-data-grid'
+import { DataGridTable } from '@/components/data-grid/data-grid'
+import { DataGridToolbar } from '@/components/data-grid/data-grid-toolbar'
+import { DataGridPivotPanel } from '@/components/data-grid/data-grid-pivot-panel'
+import { useDataGridContext } from '@/components/data-grid/hooks/use-data-grid'
+import type { DataGridConfig, ColumnConfig, PivotState } from '@/components/data-grid/types'
 
 const tradeTypes: TradeType[] = [
   'Buy',
@@ -86,6 +74,117 @@ interface TradesClientProps {
   accounts: Pick<Account, 'id' | 'account_id' | 'account_name' | 'platform'>[]
   instruments: Pick<Instrument, 'id' | 'symbol' | 'description' | 'asset_class' | 'currency'>[]
   portfolios: Pick<Portfolio, 'id' | 'name'>[]
+}
+
+// Helper functions
+const getTradeTypeColor = (type?: TradeType) => {
+  if (!type) return 'bg-gray-100 text-gray-800'
+  if (type.includes('Buy'))
+    return 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400'
+  return 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400'
+}
+
+const formatCurrency = (amount: number, currency: string) => {
+  return new Intl.NumberFormat('en-US', { style: 'currency', currency }).format(amount)
+}
+
+// Inner component that uses the DataGrid context
+function TradesDataGridInner({
+  accounts,
+  instruments,
+  portfolios,
+  onEdit,
+  onDelete,
+  onCreate,
+}: {
+  accounts: TradesClientProps['accounts']
+  instruments: TradesClientProps['instruments']
+  portfolios: TradesClientProps['portfolios']
+  onEdit: (trade: Trade) => void
+  onDelete: (trade: Trade) => void
+  onCreate: () => void
+}) {
+  const { state, actions, config } = useDataGridContext<Trade>()
+
+  const handlePivotApply = (pivotState: PivotState) => {
+    actions.setPivotState(pivotState)
+  }
+
+  return (
+    <div className="flex h-full">
+      <div className="flex-1 flex flex-col min-w-0">
+        {/* Toolbar */}
+        <div className="mb-4">
+          <DataGridToolbar
+            columns={config.columns}
+            toolbar={{
+              showSearch: true,
+              showColumnToggle: true,
+              showPivotToggle: true,
+              filters: [
+                {
+                  id: 'account_id',
+                  label: 'Account',
+                  type: 'select',
+                  field: 'account_id',
+                  options: accounts.map(acc => ({
+                    label: acc.account_name,
+                    value: acc.id,
+                  })),
+                },
+                {
+                  id: 'trade_type',
+                  label: 'Trade Type',
+                  type: 'select',
+                  field: 'trade_type',
+                  options: tradeTypes.map(type => ({
+                    label: type,
+                    value: type,
+                  })),
+                },
+                {
+                  id: 'trade_date',
+                  label: 'Date Range',
+                  type: 'daterange',
+                  field: 'trade_date',
+                },
+              ],
+              customActions: (
+                <div className="flex gap-2">
+                  <Button variant="outline" asChild>
+                    <a href="/dashboard/import">
+                      <Upload className="mr-2 size-4" />
+                      Import
+                    </a>
+                  </Button>
+                  <Button onClick={onCreate}>
+                    <Plus className="mr-2 size-4" />
+                    New Trade
+                  </Button>
+                </div>
+              ),
+            }}
+          />
+        </div>
+
+        {/* Table */}
+        <div className="flex-1 min-h-0">
+          <DataGridTable<Trade> />
+        </div>
+      </div>
+
+      {/* Pivot Panel */}
+      {state.pivotPanelOpen && (
+        <div className="w-[300px] shrink-0">
+          <DataGridPivotPanel
+            columns={config.columns}
+            onApply={handlePivotApply}
+            onClose={actions.togglePivotPanel}
+          />
+        </div>
+      )}
+    </div>
+  )
 }
 
 export function TradesClient({
@@ -107,10 +206,6 @@ export function TradesClient({
   const [editingTrade, setEditingTrade] = useState<Trade | null>(null)
   const [deletingTrade, setDeletingTrade] = useState<Trade | null>(null)
   const [isLoading, setIsLoading] = useState(false)
-  const [searchQuery, setSearchQuery] = useState('')
-  const [filterAccount, setFilterAccount] = useState<string>('all')
-  const [filterTradeType, setFilterTradeType] = useState<string>('all')
-  const [dateRange, setDateRange] = useState<{ from?: Date; to?: Date }>({})
 
   const [formData, setFormData] = useState({
     account_id: '',
@@ -129,45 +224,37 @@ export function TradesClient({
     external_id: '',
   })
 
-  // Reset filters whenever data changes
-  useEffect(() => {
-    setSearchQuery('')
-    setFilterAccount('all')
-    setFilterTradeType('all')
-    setDateRange({})
-  }, [trades])
-
-  const filteredTrades = useMemo(() => {
-    return trades.filter((trade) => {
-      const matchesSearch =
-        searchQuery === '' ||
-        trade.instrument?.symbol?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        trade.instrument?.description?.toLowerCase().includes(searchQuery.toLowerCase())
-
-      const matchesAccount = filterAccount === 'all' || trade.account_id === filterAccount
-      const matchesTradeType = filterTradeType === 'all' || trade.trade_type === filterTradeType
-
-      const tradeDate = new Date(trade.trade_date)
-      const matchesDateRange =
-        (!dateRange.from || tradeDate >= dateRange.from) &&
-        (!dateRange.to || tradeDate <= dateRange.to)
-
-      return matchesSearch && matchesAccount && matchesTradeType && matchesDateRange
-    })
-  }, [trades, searchQuery, filterAccount, filterTradeType, dateRange])
-
-  const columns: ColumnDef<Trade>[] = useMemo(
+  // Define columns for DataGrid
+  const columns: ColumnConfig<Trade>[] = useMemo(
     () => [
       {
+        id: 'trade_date',
         accessorKey: 'trade_date',
         header: 'Date',
-        cell: ({ row }) => format(new Date(row.getValue('trade_date')), 'yyyy-MM-dd'),
+        enableSorting: true,
+        enableFiltering: true,
+        filterConfig: {
+          type: 'date',
+          placeholder: 'Filter by date...',
+        },
+        dateFormat: 'yyyy-MM-dd',
+        cell: (value) => {
+          if (!value) return '-'
+          return format(new Date(value as string), 'yyyy-MM-dd')
+        },
       },
       {
-        accessorKey: 'symbol',
+        id: 'symbol',
+        accessorKey: 'instrument.symbol',
         header: 'Symbol',
-        cell: ({ row }) => {
-          const trade = row.original
+        enableSorting: true,
+        enableFiltering: true,
+        filterConfig: {
+          type: 'text',
+          placeholder: 'Search symbol...',
+        },
+        cell: (value, row) => {
+          const trade = row as Trade
           return (
             <div>
               <span className="font-medium">{trade.instrument?.symbol || '-'}</span>
@@ -181,75 +268,174 @@ export function TradesClient({
         },
       },
       {
+        id: 'trade_type',
         accessorKey: 'trade_type',
         header: 'Type',
-        cell: ({ row }) => (
-          <Badge variant="secondary" className={getTradeTypeColor(row.getValue('trade_type'))}>
-            {row.getValue('trade_type')}
+        enableSorting: true,
+        enableFiltering: true,
+        filterConfig: {
+          type: 'select',
+          options: tradeTypes.map(type => ({ label: type, value: type })),
+        },
+        cell: (value) => (
+          <Badge variant="secondary" className={getTradeTypeColor(value as TradeType)}>
+            {value as string}
           </Badge>
         ),
       },
       {
+        id: 'quantity',
         accessorKey: 'quantity',
-        header: () => <div className="text-right">Qty</div>,
-        cell: ({ row }) => (
-          <div className="text-right font-mono">{(row.getValue('quantity') as number).toLocaleString()}</div>
+        header: 'Qty',
+        align: 'right',
+        enableSorting: true,
+        enableFiltering: true,
+        enableAggregation: true,
+        aggregation: 'sum',
+        filterConfig: {
+          type: 'number',
+          placeholder: 'Filter qty...',
+        },
+        cell: (value) => (
+          <span className="font-mono">{(value as number).toLocaleString()}</span>
         ),
       },
       {
+        id: 'trade_price',
         accessorKey: 'trade_price',
-        header: () => <div className="text-right">Price</div>,
-        cell: ({ row }) => {
-          const trade = row.original
+        header: 'Price',
+        align: 'right',
+        enableSorting: true,
+        enableFiltering: true,
+        filterConfig: {
+          type: 'number',
+          placeholder: 'Filter price...',
+        },
+        numberFormat: {
+          style: 'currency',
+          currency: 'USD',
+        },
+        cell: (value, row) => {
+          const trade = row as Trade
+          const price = value as number
           return (
-            <div
+            <span
               className={cn(
-                'text-right font-mono',
-                (row.getValue('trade_price') as number) < 0 ? 'text-red-600' : 'text-green-600'
+                'font-mono',
+                price < 0 ? 'text-red-600' : 'text-green-600'
               )}
             >
-              {formatCurrency(row.getValue('trade_price') as number, trade.currency)}
-            </div>
+              {formatCurrency(price, trade.currency)}
+            </span>
           )
         },
       },
       {
+        id: 'net_amount',
         accessorKey: 'net_amount',
-        header: () => <div className="text-right">Net Amount</div>,
-        cell: ({ row }) => {
-          const trade = row.original
+        header: 'Net Amount',
+        align: 'right',
+        enableSorting: true,
+        enableFiltering: true,
+        enableAggregation: true,
+        aggregation: 'sum',
+        filterConfig: {
+          type: 'number',
+          placeholder: 'Filter amount...',
+        },
+        cell: (value, row) => {
+          const trade = row as Trade
+          const amount = value as number
           return (
-            <div
+            <span
               className={cn(
-                'text-right font-mono',
-                (row.getValue('net_amount') as number) < 0 ? 'text-red-600' : 'text-green-600'
+                'font-mono',
+                amount < 0 ? 'text-red-600' : 'text-green-600'
               )}
             >
-              {formatCurrency(row.getValue('net_amount') as number, trade.currency)}
-            </div>
+              {formatCurrency(amount, trade.currency)}
+            </span>
           )
         },
       },
       {
-        accessorKey: 'account_id',
+        id: 'account_id',
+        accessorKey: 'account.account_name',
         header: 'Account',
-        cell: ({ row }) => {
-          const trade = row.original
+        enableSorting: true,
+        enableFiltering: true,
+        enableGrouping: true,
+        filterConfig: {
+          type: 'select',
+          options: accounts.map(acc => ({ label: acc.account_name, value: acc.id })),
+        },
+        cell: (value, row) => {
+          const trade = row as Trade
           return <span className="text-sm">{trade.account?.account_name || '-'}</span>
         },
       },
       {
-        accessorKey: 'portfolio_id',
+        id: 'portfolio_id',
+        accessorKey: 'portfolio.name',
         header: 'Portfolio',
-        cell: ({ row }) => {
-          const trade = row.original
+        enableSorting: true,
+        enableFiltering: true,
+        enableGrouping: true,
+        defaultVisible: false,
+        filterConfig: {
+          type: 'select',
+          options: portfolios.map(p => ({ label: p.name, value: p.id })),
+        },
+        cell: (value, row) => {
+          const trade = row as Trade
           return <span className="text-sm">{trade.portfolio?.name || '-'}</span>
         },
       },
       {
+        id: 'commission',
+        accessorKey: 'commission',
+        header: 'Commission',
+        align: 'right',
+        enableSorting: true,
+        enableAggregation: true,
+        aggregation: 'sum',
+        defaultVisible: false,
+        cell: (value, row) => {
+          const trade = row as Trade
+          return (
+            <span className="font-mono text-muted-foreground">
+              {formatCurrency(value as number, trade.currency)}
+            </span>
+          )
+        },
+      },
+      {
+        id: 'fees',
+        accessorKey: 'fees',
+        header: 'Fees',
+        align: 'right',
+        enableSorting: true,
+        enableAggregation: true,
+        aggregation: 'sum',
+        defaultVisible: false,
+        cell: (value, row) => {
+          const trade = row as Trade
+          return (
+            <span className="font-mono text-muted-foreground">
+              {formatCurrency(value as number, trade.currency)}
+            </span>
+          )
+        },
+      },
+      {
         id: 'actions',
-        cell: ({ row }) => {
-          const trade = row.original
+        header: '',
+        enableSorting: false,
+        enableFiltering: false,
+        enableHiding: false,
+        width: 50,
+        cell: (_, row) => {
+          const trade = row as Trade
           return (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -275,14 +461,38 @@ export function TradesClient({
         },
       },
     ],
-    []
+    [accounts, portfolios]
   )
 
-  const table = useReactTable({
-    data: filteredTrades,
-    columns,
-    getCoreRowModel: getCoreRowModel(),
-  })
+  // DataGrid configuration
+  const gridConfig: DataGridConfig<Trade> = useMemo(
+    () => ({
+      id: 'trades-grid',
+      columns,
+      dataSource: {
+        type: 'client',
+        data: trades,
+      },
+      features: {
+        sorting: true,
+        filtering: true,
+        pagination: true,
+        columnVisibility: true,
+        rowSelection: false,
+        rowGrouping: true,
+        pivoting: true,
+        globalSearch: true,
+      },
+      pagination: {
+        pageSize: 20,
+        pageSizeOptions: [10, 20, 50, 100],
+        showPageSizeSelector: true,
+        showRowCount: true,
+      },
+      getRowId: (row) => row.id,
+    }),
+    [columns, trades]
+  )
 
   const resetForm = () => {
     setFormData({
@@ -307,7 +517,7 @@ export function TradesClient({
   const openCreateDialog = () => {
     resetForm()
     setIsDialogOpen(true)
-    router.refresh() // ensure fresh portfolios list after potential changes
+    router.refresh()
   }
 
   const openEditDialog = (trade: Trade) => {
@@ -342,13 +552,13 @@ export function TradesClient({
     return { gross, net }
   }
 
+  const selectedInstrument = instruments.find((i) => i.id === formData.instrument_id)
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setIsLoading(true)
 
     const { gross, net } = calculateAmounts()
-    // build payload including required schema fields
-    // ensure trade_type is never blank (defensive fallback)
     const submitData = {
       ...formData,
       trade_type: formData.trade_type || 'Buy',
@@ -408,19 +618,6 @@ export function TradesClient({
     }
   }
 
-  const getTradeTypeColor = (type?: TradeType) => {
-    if (!type) return 'bg-gray-100 text-gray-800'
-    if (type.includes('Buy'))
-      return 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400'
-    return 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400'
-  }
-
-  const formatCurrency = (amount: number, currency: string) => {
-    return new Intl.NumberFormat('en-US', { style: 'currency', currency }).format(amount)
-  }
-
-  const selectedInstrument = instruments.find((i) => i.id === formData.instrument_id)
-
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -430,163 +627,47 @@ export function TradesClient({
             Record and manage all your trades across accounts.
           </p>
         </div>
-        <div className="flex gap-2">
-          <Button variant="outline" asChild>
-            <a href="/dashboard/import">
-              <Upload className="mr-2 size-4" />
-              Import
-            </a>
-          </Button>
-          <Button onClick={openCreateDialog}>
-            <Plus className="mr-2 size-4" />
-            New Trade
-          </Button>
-        </div>
       </div>
 
       <Card>
         <CardHeader>
           <CardTitle>Trades</CardTitle>
           <CardDescription>
-            {filteredTrades.length} of {trades.length} trades
+            {trades.length} total trades
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="flex flex-col gap-4 mb-4 lg:flex-row">
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
-              <Input
-                placeholder="Search by symbol..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-9"
-              />
-            </div>
-            <Select value={filterAccount} onValueChange={setFilterAccount}>
-              <SelectTrigger className="w-[180px]">
-                <SelectValue placeholder="Account" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Accounts</SelectItem>
-                {accounts.map((acc) => (
-                  <SelectItem key={acc.id} value={acc.id}>
-                    {acc.account_name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Select value={filterTradeType} onValueChange={setFilterTradeType}>
-              <SelectTrigger className="w-[150px]">
-                <SelectValue placeholder="Trade Type" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Types</SelectItem>
-                {tradeTypes.map((type) => (
-                  <SelectItem key={type} value={type}>
-                    {type}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Popover>
-              <PopoverTrigger asChild>
-                <Button variant="outline" className="w-[200px] justify-start text-left font-normal">
-                  <Calendar className="mr-2 size-4" />
-                  {dateRange.from ? (
-                    dateRange.to ? (
-                      `${format(dateRange.from, 'MMM d')} - ${format(dateRange.to, 'MMM d')}`
-                    ) : (
-                      format(dateRange.from, 'MMM d, yyyy')
-                    )
-                  ) : (
-                    'Date range'
-                  )}
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-auto p-0" align="end">
-                <CalendarComponent
-                  mode="range"
-                  selected={{ from: dateRange.from, to: dateRange.to }}
-                  onSelect={(range) => setDateRange({ from: range?.from, to: range?.to })}
-                  numberOfMonths={2}
-                />
-                {(dateRange.from || dateRange.to) && (
-                  <div className="p-2 border-t">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="w-full"
-                      onClick={() => setDateRange({})}
-                    >
-                      Clear
-                    </Button>
-                  </div>
-                )}
-              </PopoverContent>
-            </Popover>
-          </div>
-
-          {filteredTrades.length === 0 ? (
+          {trades.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-12 text-center">
               <ArrowLeftRight className="size-12 text-muted-foreground/50 mb-4" />
               <h3 className="text-lg font-medium">No trades found</h3>
               <p className="text-muted-foreground text-sm mt-1 mb-4">
-                {trades.length === 0
-                  ? 'Start by recording your first trade or importing from a broker report.'
-                  : 'Try adjusting your search or filters.'}
+                Start by recording your first trade or importing from a broker report.
               </p>
-              {trades.length === 0 && (
-                <div className="flex gap-2">
-                  <Button variant="outline" asChild>
-                    <a href="/dashboard/import">
-                      <Upload className="mr-2 size-4" />
-                      Import
-                    </a>
-                  </Button>
-                  <Button onClick={openCreateDialog}>
-                    <Plus className="mr-2 size-4" />
-                    New Trade
-                  </Button>
-                </div>
-              )}
+              <div className="flex gap-2">
+                <Button variant="outline" asChild>
+                  <a href="/dashboard/import">
+                    <Upload className="mr-2 size-4" />
+                    Import
+                  </a>
+                </Button>
+                <Button onClick={openCreateDialog}>
+                  <Plus className="mr-2 size-4" />
+                  New Trade
+                </Button>
+              </div>
             </div>
           ) : (
-            <div className="rounded-md border overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  {table.getHeaderGroups().map((headerGroup) => (
-                    <TableRow key={headerGroup.id}>
-                      {headerGroup.headers.map((header) => (
-                        <TableHead key={header.id}>
-                          {header.isPlaceholder
-                            ? null
-                            : flexRender(header.column.columnDef.header, header.getContext())}
-                        </TableHead>
-                      ))}
-                    </TableRow>
-                  ))}
-                </TableHeader>
-                <TableBody>
-                  {table.getRowModel().rows?.length ? (
-                    table.getRowModel().rows.map((row) => (
-                      <TableRow key={row.id} data-state={row.getIsSelected() && 'selected'}>
-                        {row.getVisibleCells().map((cell) => (
-                          <TableCell key={cell.id}>
-                            {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                          </TableCell>
-                        ))}
-                      </TableRow>
-                    ))
-                  ) : (
-                    <TableRow>
-                      <TableCell colSpan={columns.length} className="h-24 text-center">
-                        No results.
-                      </TableCell>
-                    </TableRow>
-                  )}
-                </TableBody>
-              </Table>
-            </div>
+            <DataGridProvider config={gridConfig}>
+              <TradesDataGridInner
+                accounts={accounts}
+                instruments={instruments}
+                portfolios={portfolios}
+                onEdit={openEditDialog}
+                onDelete={openDeleteDialog}
+                onCreate={openCreateDialog}
+              />
+            </DataGridProvider>
           )}
         </CardContent>
       </Card>
@@ -615,7 +696,7 @@ export function TradesClient({
                     <SelectContent>
                       {accounts.map((acc) => (
                         <SelectItem key={acc.id} value={acc.id}>
-                          {acc.account_name} ({acc.platform})
+                          {acc.account_name}
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -625,18 +706,13 @@ export function TradesClient({
                   <Label htmlFor="portfolio_id">Portfolio</Label>
                   <Select
                     value={formData.portfolio_id}
-                    onValueChange={(value) =>
-                      setFormData({
-                        ...formData,
-                        portfolio_id: value === 'none' ? '' : value,
-                      })
-                    }
+                    onValueChange={(value) => setFormData({ ...formData, portfolio_id: value })}
                   >
                     <SelectTrigger>
                       <SelectValue placeholder="Select portfolio" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="none">None</SelectItem>
+                      <SelectItem value="">None</SelectItem>
                       {portfolios.map((p) => (
                         <SelectItem key={p.id} value={p.id}>
                           {p.name}
@@ -647,62 +723,42 @@ export function TradesClient({
                 </div>
               </div>
 
-              <div className="grid gap-2">
-                <Label htmlFor="instrument_id">Instrument *</Label>
-                <Select
-                  value={formData.instrument_id}
-                  onValueChange={(value) => {
-                    const inst = instruments.find((i) => i.id === value)
-                    setFormData({
-                      ...formData,
-                      instrument_id: value,
-                      currency: inst?.currency || formData.currency,
-                    })
-                  }}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select instrument" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {instruments.map((inst) => (
-                      <SelectItem key={inst.id} value={inst.id}>
-                        {inst.symbol} - {inst.description || inst.asset_class}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="grid grid-cols-3 gap-4">
+              <div className="grid grid-cols-2 gap-4">
                 <div className="grid gap-2">
-                  <Label htmlFor="trade_date">Trade Date *</Label>
-                  <Input
-                    id="trade_date"
-                    type="date"
-                    value={formData.trade_date}
-                    onChange={(e) => setFormData({ ...formData, trade_date: e.target.value })}
-                    required
-                  />
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="settle_date">Settle Date</Label>
-                  <Input
-                    id="settle_date"
-                    type="date"
-                    value={formData.settle_date}
-                    onChange={(e) => setFormData({ ...formData, settle_date: e.target.value })}
-                  />
+                  <Label htmlFor="instrument_id">Instrument *</Label>
+                  <Select
+                    value={formData.instrument_id}
+                    onValueChange={(value) => {
+                      const inst = instruments.find((i) => i.id === value)
+                      setFormData({
+                        ...formData,
+                        instrument_id: value,
+                        currency: inst?.currency || 'USD',
+                      })
+                    }}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select instrument" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {instruments.map((inst) => (
+                        <SelectItem key={inst.id} value={inst.id}>
+                          {inst.symbol} - {inst.description}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
                 <div className="grid gap-2">
                   <Label htmlFor="trade_type">Trade Type *</Label>
                   <Select
                     value={formData.trade_type}
-                    onValueChange={(value: TradeType) =>
-                      setFormData({ ...formData, trade_type: value })
+                    onValueChange={(value) =>
+                      setFormData({ ...formData, trade_type: value as TradeType })
                     }
                   >
                     <SelectTrigger>
-                      <SelectValue />
+                      <SelectValue placeholder="Select type" />
                     </SelectTrigger>
                     <SelectContent>
                       {tradeTypes.map((type) => (
@@ -715,15 +771,36 @@ export function TradesClient({
                 </div>
               </div>
 
+              <div className="grid grid-cols-2 gap-4">
+                <div className="grid gap-2">
+                  <Label htmlFor="trade_date">Trade Date *</Label>
+                  <Input
+                    id="trade_date"
+                    type="date"
+                    value={formData.trade_date}
+                    onChange={(e) => setFormData({ ...formData, trade_date: e.target.value })}
+                    required
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="settle_date">Settlement Date</Label>
+                  <Input
+                    id="settle_date"
+                    type="date"
+                    value={formData.settle_date}
+                    onChange={(e) => setFormData({ ...formData, settle_date: e.target.value })}
+                  />
+                </div>
+              </div>
+
               <div className="grid grid-cols-3 gap-4">
                 <div className="grid gap-2">
                   <Label htmlFor="quantity">Quantity *</Label>
                   <Input
                     id="quantity"
                     type="number"
-                    min="0"
-                    step="1"
-                    value={formData.quantity || ''}
+                    step="any"
+                    value={formData.quantity}
                     onChange={(e) =>
                       setFormData({ ...formData, quantity: parseFloat(e.target.value) || 0 })
                     }
@@ -735,9 +812,8 @@ export function TradesClient({
                   <Input
                     id="price"
                     type="number"
-                    min="0"
-                    step="0.0001"
-                    value={formData.price || ''}
+                    step="any"
+                    value={formData.price}
                     onChange={(e) =>
                       setFormData({ ...formData, price: parseFloat(e.target.value) || 0 })
                     }
@@ -746,11 +822,22 @@ export function TradesClient({
                 </div>
                 <div className="grid gap-2">
                   <Label htmlFor="currency">Currency</Label>
-                  <Input
-                    id="currency"
+                  <Select
                     value={formData.currency}
-                    onChange={(e) => setFormData({ ...formData, currency: e.target.value.toUpperCase() })}
-                  />
+                    onValueChange={(value) => setFormData({ ...formData, currency: value })}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="USD">USD</SelectItem>
+                      <SelectItem value="EUR">EUR</SelectItem>
+                      <SelectItem value="GBP">GBP</SelectItem>
+                      <SelectItem value="JPY">JPY</SelectItem>
+                      <SelectItem value="CNY">CNY</SelectItem>
+                      <SelectItem value="HKD">HKD</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
               </div>
 
@@ -760,9 +847,8 @@ export function TradesClient({
                   <Input
                     id="commission"
                     type="number"
-                    min="0"
-                    step="0.01"
-                    value={formData.commission || ''}
+                    step="any"
+                    value={formData.commission}
                     onChange={(e) =>
                       setFormData({ ...formData, commission: parseFloat(e.target.value) || 0 })
                     }
@@ -773,9 +859,8 @@ export function TradesClient({
                   <Input
                     id="fees"
                     type="number"
-                    min="0"
-                    step="0.01"
-                    value={formData.fees || ''}
+                    step="any"
+                    value={formData.fees}
                     onChange={(e) =>
                       setFormData({ ...formData, fees: parseFloat(e.target.value) || 0 })
                     }
@@ -786,9 +871,8 @@ export function TradesClient({
                   <Input
                     id="fx_rate"
                     type="number"
-                    min="0"
-                    step="0.0001"
-                    value={formData.fx_rate || ''}
+                    step="any"
+                    value={formData.fx_rate}
                     onChange={(e) =>
                       setFormData({ ...formData, fx_rate: parseFloat(e.target.value) || 1 })
                     }
@@ -796,45 +880,41 @@ export function TradesClient({
                 </div>
               </div>
 
-              {formData.quantity > 0 && formData.price > 0 && (
-                <div className="rounded-lg bg-muted p-4">
-                  <div className="grid grid-cols-2 gap-4 text-sm">
-                    <div>
-                      <span className="text-muted-foreground">Gross Amount:</span>
-                      <span className="ml-2 font-mono font-medium">
-                        {formatCurrency(calculateAmounts().gross, formData.currency)}
-                      </span>
-                    </div>
-                    <div>
-                      <span className="text-muted-foreground">Net Amount:</span>
-                      <span className="ml-2 font-mono font-medium">
-                        {formatCurrency(calculateAmounts().net, formData.currency)}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              )}
-
               <div className="grid gap-2">
                 <Label htmlFor="notes">Notes</Label>
                 <Input
                   id="notes"
-                  placeholder="Optional notes..."
                   value={formData.notes}
                   onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
+                  placeholder="Optional notes..."
                 />
               </div>
-            </div>
 
+              <div className="rounded-lg bg-muted p-4">
+                <div className="flex justify-between text-sm">
+                  <span>Gross Amount:</span>
+                  <span className="font-mono">
+                    {formatCurrency(calculateAmounts().gross, formData.currency)}
+                  </span>
+                </div>
+                <div className="flex justify-between text-sm mt-1">
+                  <span>Net Amount:</span>
+                  <span className="font-mono font-medium">
+                    {formatCurrency(calculateAmounts().net, formData.currency)}
+                  </span>
+                </div>
+              </div>
+            </div>
             <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setIsDialogOpen(false)}>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setIsDialogOpen(false)}
+              >
                 Cancel
               </Button>
-              <Button
-                type="submit"
-                disabled={isLoading || !formData.account_id || !formData.instrument_id}
-              >
-                {isLoading ? 'Saving...' : editingTrade ? 'Update' : 'Create'}
+              <Button type="submit" disabled={isLoading}>
+                {isLoading ? 'Saving...' : editingTrade ? 'Update Trade' : 'Create Trade'}
               </Button>
             </DialogFooter>
           </form>
@@ -847,13 +927,17 @@ export function TradesClient({
           <AlertDialogHeader>
             <AlertDialogTitle>Delete Trade</AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to delete this trade for {deletingTrade?.instrument?.symbol}?
-              This action cannot be undone.
+              Are you sure you want to delete this trade for{' '}
+              <strong>{deletingTrade?.instrument?.symbol}</strong>? This action cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={handleDelete} disabled={isLoading}>
+            <AlertDialogAction
+              onClick={handleDelete}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={isLoading}
+            >
               {isLoading ? 'Deleting...' : 'Delete'}
             </AlertDialogAction>
           </AlertDialogFooter>
