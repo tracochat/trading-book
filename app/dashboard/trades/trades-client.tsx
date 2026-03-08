@@ -1,14 +1,28 @@
-"use client"
+'use client'
 
-import { useState, useMemo, useEffect } from "react"
-import { useRouter } from "next/navigation"
-import { format } from "date-fns"
-import { 
-  Plus, MoreHorizontal, Pencil, Trash2, ArrowLeftRight, 
-  Search, Filter, Calendar, Download, Upload 
-} from "lucide-react"
-import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { useState, useMemo, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
+import { format } from 'date-fns'
+import {
+  Plus,
+  MoreHorizontal,
+  Pencil,
+  Trash2,
+  ArrowLeftRight,
+  Search,
+  Filter,
+  Calendar,
+  Download,
+  Upload,
+} from 'lucide-react'
+import {
+  flexRender,
+  getCoreRowModel,
+  useReactTable,
+  ColumnDef,
+} from '@tanstack/react-table'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import {
   Table,
   TableBody,
@@ -16,13 +30,13 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@/components/ui/table"
+} from '@/components/ui/table'
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
+} from '@/components/ui/dropdown-menu'
 import {
   Dialog,
   DialogContent,
@@ -30,7 +44,7 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog"
+} from '@/components/ui/dialog'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -40,25 +54,32 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from "@/components/ui/alert-dialog"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
+} from '@/components/ui/alert-dialog'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select"
-import { Badge } from "@/components/ui/badge"
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { Calendar as CalendarComponent } from "@/components/ui/calendar"
-import { toast } from "sonner"
-import type { Trade, TradeType, Account, Instrument, Portfolio } from "@/lib/types"
-import { createTrade, updateTrade, deleteTrade } from "./actions"
-import { cn } from "@/lib/utils"
+} from '@/components/ui/select'
+import { Badge } from '@/components/ui/badge'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { Calendar as CalendarComponent } from '@/components/ui/calendar'
+import { toast } from 'sonner'
+import type { Trade, TradeType, Account, Instrument, Portfolio } from '@/lib/types'
+import { createTrade, updateTrade, deleteTrade } from './actions'
+import { cn } from '@/lib/utils'
 
-const tradeTypes: TradeType[] = ['Buy', 'Sell', 'Buy to Open', 'Buy to Close', 'Sell to Open', 'Sell to Close']
+const tradeTypes: TradeType[] = [
+  'Buy',
+  'Sell',
+  'Buy to Open',
+  'Buy to Close',
+  'Sell to Open',
+  'Sell to Close',
+]
 
 interface TradesClientProps {
   initialTrades: Trade[]
@@ -67,21 +88,21 @@ interface TradesClientProps {
   portfolios: Pick<Portfolio, 'id' | 'name'>[]
 }
 
-export function TradesClient({ initialTrades, accounts, instruments, portfolios }: TradesClientProps) {
+export function TradesClient({
+  initialTrades,
+  accounts,
+  instruments,
+  portfolios,
+}: TradesClientProps) {
   const router = useRouter()
   const [trades, setTrades] = useState<Trade[]>(initialTrades)
-  // keep local trades array in sync when props are refreshed
+
+  // Keep local trades array in sync when props are refreshed
   useEffect(() => {
     setTrades(initialTrades)
   }, [initialTrades])
+
   const [isDialogOpen, setIsDialogOpen] = useState(false)
-  // reset filters whenever data changes
-  useEffect(() => {
-    setSearchQuery('')
-    setFilterAccount('all')
-    setFilterTradeType('all')
-    setDateRange({})
-  }, [trades])
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
   const [editingTrade, setEditingTrade] = useState<Trade | null>(null)
   const [deletingTrade, setDeletingTrade] = useState<Trade | null>(null)
@@ -108,22 +129,160 @@ export function TradesClient({ initialTrades, accounts, instruments, portfolios 
     external_id: '',
   })
 
+  // Reset filters whenever data changes
+  useEffect(() => {
+    setSearchQuery('')
+    setFilterAccount('all')
+    setFilterTradeType('all')
+    setDateRange({})
+  }, [trades])
+
   const filteredTrades = useMemo(() => {
-    return trades.filter(trade => {
-      const matchesSearch = searchQuery === '' || 
+    return trades.filter((trade) => {
+      const matchesSearch =
+        searchQuery === '' ||
         trade.instrument?.symbol?.toLowerCase().includes(searchQuery.toLowerCase()) ||
         trade.instrument?.description?.toLowerCase().includes(searchQuery.toLowerCase())
-      
+
       const matchesAccount = filterAccount === 'all' || trade.account_id === filterAccount
       const matchesTradeType = filterTradeType === 'all' || trade.trade_type === filterTradeType
-      
+
       const tradeDate = new Date(trade.trade_date)
-      const matchesDateRange = (!dateRange.from || tradeDate >= dateRange.from) && 
-                               (!dateRange.to || tradeDate <= dateRange.to)
-      
+      const matchesDateRange =
+        (!dateRange.from || tradeDate >= dateRange.from) &&
+        (!dateRange.to || tradeDate <= dateRange.to)
+
       return matchesSearch && matchesAccount && matchesTradeType && matchesDateRange
     })
   }, [trades, searchQuery, filterAccount, filterTradeType, dateRange])
+
+  const columns: ColumnDef<Trade>[] = useMemo(
+    () => [
+      {
+        accessorKey: 'trade_date',
+        header: 'Date',
+        cell: ({ row }) => format(new Date(row.getValue('trade_date')), 'yyyy-MM-dd'),
+      },
+      {
+        accessorKey: 'symbol',
+        header: 'Symbol',
+        cell: ({ row }) => {
+          const trade = row.original
+          return (
+            <div>
+              <span className="font-medium">{trade.instrument?.symbol || '-'}</span>
+              {trade.instrument?.description && (
+                <p className="text-xs text-muted-foreground truncate max-w-[150px]">
+                  {trade.instrument.description}
+                </p>
+              )}
+            </div>
+          )
+        },
+      },
+      {
+        accessorKey: 'trade_type',
+        header: 'Type',
+        cell: ({ row }) => (
+          <Badge variant="secondary" className={getTradeTypeColor(row.getValue('trade_type'))}>
+            {row.getValue('trade_type')}
+          </Badge>
+        ),
+      },
+      {
+        accessorKey: 'quantity',
+        header: () => <div className="text-right">Qty</div>,
+        cell: ({ row }) => (
+          <div className="text-right font-mono">{(row.getValue('quantity') as number).toLocaleString()}</div>
+        ),
+      },
+      {
+        accessorKey: 'trade_price',
+        header: () => <div className="text-right">Price</div>,
+        cell: ({ row }) => {
+          const trade = row.original
+          return (
+            <div
+              className={cn(
+                'text-right font-mono',
+                (row.getValue('trade_price') as number) < 0 ? 'text-red-600' : 'text-green-600'
+              )}
+            >
+              {formatCurrency(row.getValue('trade_price') as number, trade.currency)}
+            </div>
+          )
+        },
+      },
+      {
+        accessorKey: 'net_amount',
+        header: () => <div className="text-right">Net Amount</div>,
+        cell: ({ row }) => {
+          const trade = row.original
+          return (
+            <div
+              className={cn(
+                'text-right font-mono',
+                (row.getValue('net_amount') as number) < 0 ? 'text-red-600' : 'text-green-600'
+              )}
+            >
+              {formatCurrency(row.getValue('net_amount') as number, trade.currency)}
+            </div>
+          )
+        },
+      },
+      {
+        accessorKey: 'account_id',
+        header: 'Account',
+        cell: ({ row }) => {
+          const trade = row.original
+          return <span className="text-sm">{trade.account?.account_name || '-'}</span>
+        },
+      },
+      {
+        accessorKey: 'portfolio_id',
+        header: 'Portfolio',
+        cell: ({ row }) => {
+          const trade = row.original
+          return <span className="text-sm">{trade.portfolio?.name || '-'}</span>
+        },
+      },
+      {
+        id: 'actions',
+        cell: ({ row }) => {
+          const trade = row.original
+          return (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="icon">
+                  <MoreHorizontal className="size-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={() => openEditDialog(trade)}>
+                  <Pencil className="mr-2 size-4" />
+                  Edit
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() => openDeleteDialog(trade)}
+                  className="text-destructive"
+                >
+                  <Trash2 className="mr-2 size-4" />
+                  Delete
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )
+        },
+      },
+    ],
+    []
+  )
+
+  const table = useReactTable({
+    data: filteredTrades,
+    columns,
+    getCoreRowModel: getCoreRowModel(),
+  })
 
   const resetForm = () => {
     setFormData({
@@ -251,7 +410,8 @@ export function TradesClient({ initialTrades, accounts, instruments, portfolios 
 
   const getTradeTypeColor = (type?: TradeType) => {
     if (!type) return 'bg-gray-100 text-gray-800'
-    if (type.includes('Buy')) return 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400'
+    if (type.includes('Buy'))
+      return 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400'
     return 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400'
   }
 
@@ -259,7 +419,7 @@ export function TradesClient({ initialTrades, accounts, instruments, portfolios 
     return new Intl.NumberFormat('en-US', { style: 'currency', currency }).format(amount)
   }
 
-  const selectedInstrument = instruments.find(i => i.id === formData.instrument_id)
+  const selectedInstrument = instruments.find((i) => i.id === formData.instrument_id)
 
   return (
     <div className="space-y-6">
@@ -309,7 +469,9 @@ export function TradesClient({ initialTrades, accounts, instruments, portfolios 
               <SelectContent>
                 <SelectItem value="all">All Accounts</SelectItem>
                 {accounts.map((acc) => (
-                  <SelectItem key={acc.id} value={acc.id}>{acc.account_name}</SelectItem>
+                  <SelectItem key={acc.id} value={acc.id}>
+                    {acc.account_name}
+                  </SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -320,7 +482,9 @@ export function TradesClient({ initialTrades, accounts, instruments, portfolios 
               <SelectContent>
                 <SelectItem value="all">All Types</SelectItem>
                 {tradeTypes.map((type) => (
-                  <SelectItem key={type} value={type}>{type}</SelectItem>
+                  <SelectItem key={type} value={type}>
+                    {type}
+                  </SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -330,12 +494,12 @@ export function TradesClient({ initialTrades, accounts, instruments, portfolios 
                   <Calendar className="mr-2 size-4" />
                   {dateRange.from ? (
                     dateRange.to ? (
-                      `${format(dateRange.from, "MMM d")} - ${format(dateRange.to, "MMM d")}`
+                      `${format(dateRange.from, 'MMM d')} - ${format(dateRange.to, 'MMM d')}`
                     ) : (
-                      format(dateRange.from, "MMM d, yyyy")
+                      format(dateRange.from, 'MMM d, yyyy')
                     )
                   ) : (
-                    "Date range"
+                    'Date range'
                   )}
                 </Button>
               </PopoverTrigger>
@@ -348,9 +512,9 @@ export function TradesClient({ initialTrades, accounts, instruments, portfolios 
                 />
                 {(dateRange.from || dateRange.to) && (
                   <div className="p-2 border-t">
-                    <Button 
-                      variant="ghost" 
-                      size="sm" 
+                    <Button
+                      variant="ghost"
+                      size="sm"
                       className="w-full"
                       onClick={() => setDateRange({})}
                     >
@@ -367,7 +531,7 @@ export function TradesClient({ initialTrades, accounts, instruments, portfolios 
               <ArrowLeftRight className="size-12 text-muted-foreground/50 mb-4" />
               <h3 className="text-lg font-medium">No trades found</h3>
               <p className="text-muted-foreground text-sm mt-1 mb-4">
-                {trades.length === 0 
+                {trades.length === 0
                   ? 'Start by recording your first trade or importing from a broker report.'
                   : 'Try adjusting your search or filters.'}
               </p>
@@ -390,88 +554,36 @@ export function TradesClient({ initialTrades, accounts, instruments, portfolios 
             <div className="rounded-md border overflow-x-auto">
               <Table>
                 <TableHeader>
-                  <TableRow>
-                    <TableHead>Date</TableHead>
-                    <TableHead>Symbol</TableHead>
-                    <TableHead>Type</TableHead>
-                    <TableHead className="text-right">Qty</TableHead>
-                    <TableHead className="text-right">Price</TableHead>
-                    <TableHead className="text-right">Net Amount</TableHead>
-                    <TableHead>Account</TableHead>
-                    <TableHead>Portfolio</TableHead>
-                    <TableHead className="w-[50px]"></TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {filteredTrades.map((trade) => (
-                    <TableRow key={trade.id}>
-                      <TableCell className="font-mono text-sm">
-                        {format(new Date(trade.trade_date), "yyyy-MM-dd")}
-                      </TableCell>
-                      <TableCell>
-                        <div>
-                          <span className="font-medium">{trade.instrument?.symbol || '-'}</span>
-                          {trade.instrument?.description && (
-                            <p className="text-xs text-muted-foreground truncate max-w-[150px]">
-                              {trade.instrument.description}
-                            </p>
-                          )}
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant="secondary" className={getTradeTypeColor(trade.trade_type)}>
-                          {trade.trade_type}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-right font-mono">
-                        {trade.quantity.toLocaleString()}
-                      </TableCell>
-                      <TableCell
-                        className={cn(
-                          "text-right font-mono",
-                          trade.price < 0 ? "text-red-600" : "text-green-600",
-                        )}
-                      >
-                        {formatCurrency(trade.price, trade.currency)}
-                      </TableCell>
-                      <TableCell
-                        className={cn(
-                          "text-right font-mono",
-                          trade.net_amount < 0 ? "text-red-600" : "text-green-600",
-                        )}
-                      >
-                        {formatCurrency(trade.net_amount, trade.currency)}
-                      </TableCell>
-                      <TableCell>
-                        <span className="text-sm">{trade.account?.account_name || '-'}</span>
-                      </TableCell>
-                      <TableCell>
-                        <span className="text-sm">{trade.portfolio?.name || '-'}</span>
-                      </TableCell>
-                      <TableCell>
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="icon">
-                              <MoreHorizontal className="size-4" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
-                            <DropdownMenuItem onClick={() => openEditDialog(trade)}>
-                              <Pencil className="mr-2 size-4" />
-                              Edit
-                            </DropdownMenuItem>
-                            <DropdownMenuItem 
-                              onClick={() => openDeleteDialog(trade)}
-                              className="text-destructive"
-                            >
-                              <Trash2 className="mr-2 size-4" />
-                              Delete
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      </TableCell>
+                  {table.getHeaderGroups().map((headerGroup) => (
+                    <TableRow key={headerGroup.id}>
+                      {headerGroup.headers.map((header) => (
+                        <TableHead key={header.id}>
+                          {header.isPlaceholder
+                            ? null
+                            : flexRender(header.column.columnDef.header, header.getContext())}
+                        </TableHead>
+                      ))}
                     </TableRow>
                   ))}
+                </TableHeader>
+                <TableBody>
+                  {table.getRowModel().rows?.length ? (
+                    table.getRowModel().rows.map((row) => (
+                      <TableRow key={row.id} data-state={row.getIsSelected() && 'selected'}>
+                        {row.getVisibleCells().map((cell) => (
+                          <TableCell key={cell.id}>
+                            {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                          </TableCell>
+                        ))}
+                      </TableRow>
+                    ))
+                  ) : (
+                    <TableRow>
+                      <TableCell colSpan={columns.length} className="h-24 text-center">
+                        No results.
+                      </TableCell>
+                    </TableRow>
+                  )}
                 </TableBody>
               </Table>
             </div>
@@ -485,9 +597,7 @@ export function TradesClient({ initialTrades, accounts, instruments, portfolios 
           <DialogHeader>
             <DialogTitle>{editingTrade ? 'Edit Trade' : 'Record New Trade'}</DialogTitle>
             <DialogDescription>
-              {editingTrade 
-                ? 'Update the trade details below.' 
-                : 'Enter the details for your trade.'}
+              {editingTrade ? 'Update the trade details below.' : 'Enter the details for your trade.'}
             </DialogDescription>
           </DialogHeader>
           <form onSubmit={handleSubmit}>
@@ -495,8 +605,8 @@ export function TradesClient({ initialTrades, accounts, instruments, portfolios 
               <div className="grid grid-cols-2 gap-4">
                 <div className="grid gap-2">
                   <Label htmlFor="account_id">Account *</Label>
-                  <Select 
-                    value={formData.account_id} 
+                  <Select
+                    value={formData.account_id}
                     onValueChange={(value) => setFormData({ ...formData, account_id: value })}
                   >
                     <SelectTrigger>
@@ -513,9 +623,14 @@ export function TradesClient({ initialTrades, accounts, instruments, portfolios 
                 </div>
                 <div className="grid gap-2">
                   <Label htmlFor="portfolio_id">Portfolio</Label>
-                  <Select 
-                    value={formData.portfolio_id} 
-                    onValueChange={(value) => setFormData({ ...formData, portfolio_id: value === 'none' ? '' : value })}
+                  <Select
+                    value={formData.portfolio_id}
+                    onValueChange={(value) =>
+                      setFormData({
+                        ...formData,
+                        portfolio_id: value === 'none' ? '' : value,
+                      })
+                    }
                   >
                     <SelectTrigger>
                       <SelectValue placeholder="Select portfolio" />
@@ -523,7 +638,9 @@ export function TradesClient({ initialTrades, accounts, instruments, portfolios 
                     <SelectContent>
                       <SelectItem value="none">None</SelectItem>
                       {portfolios.map((p) => (
-                        <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                        <SelectItem key={p.id} value={p.id}>
+                          {p.name}
+                        </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
@@ -532,14 +649,14 @@ export function TradesClient({ initialTrades, accounts, instruments, portfolios 
 
               <div className="grid gap-2">
                 <Label htmlFor="instrument_id">Instrument *</Label>
-                <Select 
-                  value={formData.instrument_id} 
+                <Select
+                  value={formData.instrument_id}
                   onValueChange={(value) => {
-                    const inst = instruments.find(i => i.id === value)
-                    setFormData({ 
-                      ...formData, 
+                    const inst = instruments.find((i) => i.id === value)
+                    setFormData({
+                      ...formData,
                       instrument_id: value,
-                      currency: inst?.currency || formData.currency
+                      currency: inst?.currency || formData.currency,
                     })
                   }}
                 >
@@ -578,16 +695,20 @@ export function TradesClient({ initialTrades, accounts, instruments, portfolios 
                 </div>
                 <div className="grid gap-2">
                   <Label htmlFor="trade_type">Trade Type *</Label>
-                  <Select 
-                    value={formData.trade_type} 
-                    onValueChange={(value: TradeType) => setFormData({ ...formData, trade_type: value })}
+                  <Select
+                    value={formData.trade_type}
+                    onValueChange={(value: TradeType) =>
+                      setFormData({ ...formData, trade_type: value })
+                    }
                   >
                     <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
                       {tradeTypes.map((type) => (
-                        <SelectItem key={type} value={type}>{type}</SelectItem>
+                        <SelectItem key={type} value={type}>
+                          {type}
+                        </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
@@ -603,7 +724,9 @@ export function TradesClient({ initialTrades, accounts, instruments, portfolios 
                     min="0"
                     step="1"
                     value={formData.quantity || ''}
-                    onChange={(e) => setFormData({ ...formData, quantity: parseFloat(e.target.value) || 0 })}
+                    onChange={(e) =>
+                      setFormData({ ...formData, quantity: parseFloat(e.target.value) || 0 })
+                    }
                     required
                   />
                 </div>
@@ -615,7 +738,9 @@ export function TradesClient({ initialTrades, accounts, instruments, portfolios 
                     min="0"
                     step="0.0001"
                     value={formData.price || ''}
-                    onChange={(e) => setFormData({ ...formData, price: parseFloat(e.target.value) || 0 })}
+                    onChange={(e) =>
+                      setFormData({ ...formData, price: parseFloat(e.target.value) || 0 })
+                    }
                     required
                   />
                 </div>
@@ -638,7 +763,9 @@ export function TradesClient({ initialTrades, accounts, instruments, portfolios 
                     min="0"
                     step="0.01"
                     value={formData.commission || ''}
-                    onChange={(e) => setFormData({ ...formData, commission: parseFloat(e.target.value) || 0 })}
+                    onChange={(e) =>
+                      setFormData({ ...formData, commission: parseFloat(e.target.value) || 0 })
+                    }
                   />
                 </div>
                 <div className="grid gap-2">
@@ -649,7 +776,9 @@ export function TradesClient({ initialTrades, accounts, instruments, portfolios 
                     min="0"
                     step="0.01"
                     value={formData.fees || ''}
-                    onChange={(e) => setFormData({ ...formData, fees: parseFloat(e.target.value) || 0 })}
+                    onChange={(e) =>
+                      setFormData({ ...formData, fees: parseFloat(e.target.value) || 0 })
+                    }
                   />
                 </div>
                 <div className="grid gap-2">
@@ -660,7 +789,9 @@ export function TradesClient({ initialTrades, accounts, instruments, portfolios 
                     min="0"
                     step="0.0001"
                     value={formData.fx_rate || ''}
-                    onChange={(e) => setFormData({ ...formData, fx_rate: parseFloat(e.target.value) || 1 })}
+                    onChange={(e) =>
+                      setFormData({ ...formData, fx_rate: parseFloat(e.target.value) || 1 })
+                    }
                   />
                 </div>
               </div>
@@ -694,13 +825,16 @@ export function TradesClient({ initialTrades, accounts, instruments, portfolios 
                 />
               </div>
             </div>
-            
+
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => setIsDialogOpen(false)}>
                 Cancel
               </Button>
-              <Button type="submit" disabled={isLoading || !formData.account_id || !formData.instrument_id}>
-                {isLoading ? 'Saving...' : (editingTrade ? 'Update' : 'Create')}
+              <Button
+                type="submit"
+                disabled={isLoading || !formData.account_id || !formData.instrument_id}
+              >
+                {isLoading ? 'Saving...' : editingTrade ? 'Update' : 'Create'}
               </Button>
             </DialogFooter>
           </form>
@@ -713,7 +847,7 @@ export function TradesClient({ initialTrades, accounts, instruments, portfolios 
           <AlertDialogHeader>
             <AlertDialogTitle>Delete Trade</AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to delete this trade for {deletingTrade?.instrument?.symbol}? 
+              Are you sure you want to delete this trade for {deletingTrade?.instrument?.symbol}?
               This action cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
