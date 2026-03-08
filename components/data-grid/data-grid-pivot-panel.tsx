@@ -1,0 +1,508 @@
+"use client"
+
+import { useState } from "react"
+import {
+  DndContext,
+  DragOverlay,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+  type DragStartEvent,
+  useDroppable,
+  useDraggable,
+} from "@dnd-kit/core"
+import {
+  SortableContext,
+  sortableKeyboardCoordinates,
+  verticalListSortingStrategy,
+  useSortable,
+} from "@dnd-kit/sortable"
+import { CSS } from "@dnd-kit/utilities"
+import { GripVertical, X, ChevronDown } from "lucide-react"
+import { cn } from "@/lib/utils"
+import { Button } from "@/components/ui/button"
+import { ScrollArea } from "@/components/ui/scroll-area"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible"
+import { usePivot } from "./hooks/use-pivot"
+import type { ColumnConfig, AggregationFn } from "./types"
+
+interface DataGridPivotPanelProps<TData> {
+  columns: ColumnConfig<TData>[]
+  onApply: (state: ReturnType<typeof usePivot>["pivotState"]) => void
+  onClose: () => void
+}
+
+export function DataGridPivotPanel<TData>({
+  columns,
+  onApply,
+  onClose,
+}: DataGridPivotPanelProps<TData>) {
+  const pivot = usePivot({
+    columns,
+    onApply,
+  })
+  
+  const [activeId, setActiveId] = useState<string | null>(null)
+  const [activeZone, setActiveZone] = useState<string | null>(null)
+  
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        distance: 8,
+      },
+    }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  )
+  
+  const handleDragStart = (event: DragStartEvent) => {
+    setActiveId(event.active.id as string)
+    // Determine source zone from the data
+    const data = event.active.data.current
+    setActiveZone(data?.zone || "available")
+  }
+  
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event
+    
+    if (!over) {
+      setActiveId(null)
+      setActiveZone(null)
+      return
+    }
+    
+    const activeData = active.data.current
+    const overData = over.data.current
+    
+    const sourceZone = activeData?.zone || "available"
+    const targetZone = overData?.zone || over.id
+    
+    if (sourceZone !== targetZone && typeof active.id === "string") {
+      pivot.moveField(
+        active.id,
+        sourceZone as "available" | "rowGroups" | "columnGroups" | "values" | "filters",
+        targetZone as "available" | "rowGroups" | "columnGroups" | "values" | "filters"
+      )
+    }
+    
+    setActiveId(null)
+    setActiveZone(null)
+  }
+  
+  const activeColumn = activeId 
+    ? columns.find(c => c.id === activeId) 
+    : null
+  
+  return (
+    <div className="flex flex-col h-full border-l bg-background">
+      {/* Header */}
+      <div className="flex items-center justify-between px-4 py-3 border-b">
+        <h3 className="font-semibold text-sm">Pivot Configuration</h3>
+        <Button variant="ghost" size="icon" className="size-7" onClick={onClose}>
+          <X className="size-4" />
+          <span className="sr-only">Close</span>
+        </Button>
+      </div>
+      
+      {/* Content */}
+      <ScrollArea className="flex-1">
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCenter}
+          onDragStart={handleDragStart}
+          onDragEnd={handleDragEnd}
+        >
+          <div className="p-4 space-y-4">
+            {/* Available Fields */}
+            <PivotSection
+              title="Available Fields"
+              zone="available"
+              defaultOpen
+            >
+              <DroppableZone zone="available">
+                {pivot.availableFields.map((col) => (
+                  <DraggableField
+                    key={col.id}
+                    id={col.id}
+                    label={col.header}
+                    zone="available"
+                  />
+                ))}
+                {pivot.availableFields.length === 0 && (
+                  <p className="text-xs text-muted-foreground py-2">
+                    All fields are in use
+                  </p>
+                )}
+              </DroppableZone>
+            </PivotSection>
+            
+            {/* Row Groups */}
+            <PivotSection
+              title="Row Groups"
+              zone="rowGroups"
+              count={pivot.draftState.rowGroups.length}
+              defaultOpen
+            >
+              <DroppableZone zone="rowGroups" isEmpty={pivot.draftState.rowGroups.length === 0}>
+                <SortableContext
+                  items={pivot.draftState.rowGroups.map(rg => rg.id)}
+                  strategy={verticalListSortingStrategy}
+                >
+                  {pivot.draftState.rowGroups.map((rg) => (
+                    <SortableField
+                      key={rg.id}
+                      id={rg.id}
+                      label={rg.displayName}
+                      zone="rowGroups"
+                      onRemove={() => pivot.removeRowGroup(rg.id)}
+                    />
+                  ))}
+                </SortableContext>
+              </DroppableZone>
+            </PivotSection>
+            
+            {/* Column Groups (Pivot) */}
+            <PivotSection
+              title="Column Groups"
+              zone="columnGroups"
+              count={pivot.draftState.columnGroups.length}
+            >
+              <DroppableZone zone="columnGroups" isEmpty={pivot.draftState.columnGroups.length === 0}>
+                {pivot.draftState.columnGroups.map((cg) => {
+                  const col = columns.find(c => c.id === cg.id)
+                  return (
+                    <DraggableField
+                      key={cg.id}
+                      id={cg.id}
+                      label={col?.header || cg.id}
+                      zone="columnGroups"
+                      onRemove={() => pivot.removeColumnGroup(cg.id)}
+                    />
+                  )
+                })}
+              </DroppableZone>
+            </PivotSection>
+            
+            {/* Values */}
+            <PivotSection
+              title="Values"
+              zone="values"
+              count={pivot.draftState.values.length}
+              defaultOpen
+            >
+              <DroppableZone zone="values" isEmpty={pivot.draftState.values.length === 0}>
+                {pivot.draftState.values.map((v) => {
+                  const col = columns.find(c => c.id === v.id)
+                  return (
+                    <ValueField
+                      key={v.id}
+                      id={v.id}
+                      label={col?.header || v.id}
+                      aggFunc={v.aggFunc}
+                      onAggFuncChange={(fn) => pivot.updateValueAggFunc(v.id, fn)}
+                      onRemove={() => pivot.removeValue(v.id)}
+                    />
+                  )
+                })}
+              </DroppableZone>
+            </PivotSection>
+            
+            {/* Filters */}
+            <PivotSection
+              title="Filters"
+              zone="filters"
+              count={pivot.draftState.filters.length}
+            >
+              <DroppableZone zone="filters" isEmpty={pivot.draftState.filters.length === 0}>
+                {pivot.draftState.filters.map((f) => {
+                  const col = columns.find(c => c.id === f.id)
+                  return (
+                    <DraggableField
+                      key={f.id}
+                      id={f.id}
+                      label={col?.header || f.id}
+                      zone="filters"
+                      onRemove={() => pivot.removeFilter(f.id)}
+                    />
+                  )
+                })}
+              </DroppableZone>
+            </PivotSection>
+          </div>
+          
+          {/* Drag overlay */}
+          <DragOverlay>
+            {activeColumn && (
+              <div className="flex items-center gap-2 px-3 py-2 bg-background border rounded-md shadow-lg text-sm">
+                <GripVertical className="size-3.5 text-muted-foreground" />
+                {activeColumn.header}
+              </div>
+            )}
+          </DragOverlay>
+        </DndContext>
+      </ScrollArea>
+      
+      {/* Footer */}
+      <div className="flex items-center gap-2 p-4 border-t">
+        <Button
+          variant="outline"
+          size="sm"
+          className="flex-1"
+          onClick={pivot.reset}
+          disabled={!pivot.isDirty}
+        >
+          Reset
+        </Button>
+        <Button
+          size="sm"
+          className="flex-1"
+          onClick={pivot.apply}
+          disabled={!pivot.isDirty}
+        >
+          Apply
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+// Collapsible section
+interface PivotSectionProps {
+  title: string
+  zone: string
+  count?: number
+  defaultOpen?: boolean
+  children: React.ReactNode
+}
+
+function PivotSection({ title, zone, count, defaultOpen = false, children }: PivotSectionProps) {
+  return (
+    <Collapsible defaultOpen={defaultOpen}>
+      <CollapsibleTrigger className="flex items-center justify-between w-full py-2 text-sm font-medium hover:text-foreground/80">
+        <span className="flex items-center gap-2">
+          {title}
+          {count !== undefined && count > 0 && (
+            <span className="text-xs text-muted-foreground">({count})</span>
+          )}
+        </span>
+        <ChevronDown className="size-4 transition-transform duration-200 [[data-state=open]>&]:rotate-180" />
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        {children}
+      </CollapsibleContent>
+    </Collapsible>
+  )
+}
+
+// Droppable zone
+interface DroppableZoneProps {
+  zone: string
+  isEmpty?: boolean
+  children: React.ReactNode
+}
+
+function DroppableZone({ zone, isEmpty, children }: DroppableZoneProps) {
+  const { setNodeRef, isOver } = useDroppable({
+    id: zone,
+    data: { zone },
+  })
+  
+  return (
+    <div
+      ref={setNodeRef}
+      className={cn(
+        "min-h-[60px] rounded-md border border-dashed p-2 space-y-1 transition-colors",
+        isOver && "border-primary bg-primary/5",
+        isEmpty && "flex items-center justify-center"
+      )}
+    >
+      {isEmpty ? (
+        <p className="text-xs text-muted-foreground">Drop fields here</p>
+      ) : (
+        children
+      )}
+    </div>
+  )
+}
+
+// Draggable field
+interface DraggableFieldProps {
+  id: string
+  label: string
+  zone: string
+  onRemove?: () => void
+}
+
+function DraggableField({ id, label, zone, onRemove }: DraggableFieldProps) {
+  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
+    id,
+    data: { zone },
+  })
+  
+  const style = transform ? {
+    transform: CSS.Translate.toString(transform),
+  } : undefined
+  
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className={cn(
+        "flex items-center gap-2 px-2 py-1.5 bg-muted/50 rounded-md text-sm group",
+        isDragging && "opacity-50"
+      )}
+    >
+      <button
+        className="cursor-grab active:cursor-grabbing touch-none"
+        {...listeners}
+        {...attributes}
+      >
+        <GripVertical className="size-3.5 text-muted-foreground" />
+      </button>
+      <span className="flex-1 truncate">{label}</span>
+      {onRemove && (
+        <Button
+          variant="ghost"
+          size="icon"
+          className="size-5 opacity-0 group-hover:opacity-100"
+          onClick={onRemove}
+        >
+          <X className="size-3" />
+          <span className="sr-only">Remove</span>
+        </Button>
+      )}
+    </div>
+  )
+}
+
+// Sortable field (for row groups)
+interface SortableFieldProps {
+  id: string
+  label: string
+  zone: string
+  onRemove: () => void
+}
+
+function SortableField({ id, label, zone, onRemove }: SortableFieldProps) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({
+    id,
+    data: { zone },
+  })
+  
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+  }
+  
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className={cn(
+        "flex items-center gap-2 px-2 py-1.5 bg-muted/50 rounded-md text-sm group",
+        isDragging && "opacity-50"
+      )}
+    >
+      <button
+        className="cursor-grab active:cursor-grabbing touch-none"
+        {...listeners}
+        {...attributes}
+      >
+        <GripVertical className="size-3.5 text-muted-foreground" />
+      </button>
+      <span className="flex-1 truncate">{label}</span>
+      <Button
+        variant="ghost"
+        size="icon"
+        className="size-5 opacity-0 group-hover:opacity-100"
+        onClick={onRemove}
+      >
+        <X className="size-3" />
+        <span className="sr-only">Remove</span>
+      </Button>
+    </div>
+  )
+}
+
+// Value field with aggregation selector
+interface ValueFieldProps {
+  id: string
+  label: string
+  aggFunc: AggregationFn
+  onAggFuncChange: (fn: AggregationFn) => void
+  onRemove: () => void
+}
+
+function ValueField({ id, label, aggFunc, onAggFuncChange, onRemove }: ValueFieldProps) {
+  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
+    id,
+    data: { zone: "values" },
+  })
+  
+  const style = transform ? {
+    transform: CSS.Translate.toString(transform),
+  } : undefined
+  
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className={cn(
+        "flex items-center gap-2 px-2 py-1.5 bg-muted/50 rounded-md text-sm group",
+        isDragging && "opacity-50"
+      )}
+    >
+      <button
+        className="cursor-grab active:cursor-grabbing touch-none"
+        {...listeners}
+        {...attributes}
+      >
+        <GripVertical className="size-3.5 text-muted-foreground" />
+      </button>
+      <span className="flex-1 truncate">{label}</span>
+      <Select value={aggFunc} onValueChange={(v) => onAggFuncChange(v as AggregationFn)}>
+        <SelectTrigger className="h-6 w-[70px] text-xs">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="sum">Sum</SelectItem>
+          <SelectItem value="avg">Avg</SelectItem>
+          <SelectItem value="count">Count</SelectItem>
+          <SelectItem value="min">Min</SelectItem>
+          <SelectItem value="max">Max</SelectItem>
+        </SelectContent>
+      </Select>
+      <Button
+        variant="ghost"
+        size="icon"
+        className="size-5 opacity-0 group-hover:opacity-100"
+        onClick={onRemove}
+      >
+        <X className="size-3" />
+        <span className="sr-only">Remove</span>
+      </Button>
+    </div>
+  )
+}
