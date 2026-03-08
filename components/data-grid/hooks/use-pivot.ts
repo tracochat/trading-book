@@ -10,14 +10,25 @@ const emptyPivotState: PivotState = {
   filters: [],
 }
 
+interface PivotApplyArgs {
+  pivotState: PivotState
+  availableOrder: string[]
+}
+
 interface UsePivotOptions<TData> {
   columns: ColumnConfig<TData>[]
   initialState?: Partial<PivotState>
-  onApply?: (state: PivotState) => void
+  /**
+   * Called when the user hits Apply. Provides both the final pivot state and
+   * the current ordering of all columns (used by the grid to rearrange
+   * visible columns).
+   */
+  onApply?: (args: PivotApplyArgs) => void
 }
 
 export function usePivot<TData = unknown>(options: UsePivotOptions<TData>) {
   const { columns, initialState, onApply } = options
+  const initialAvailableOrder = useMemo(() => columns.map((column) => column.id), [columns])
   
   const [pivotState, setPivotState] = useState<PivotState>({
     ...emptyPivotState,
@@ -25,20 +36,46 @@ export function usePivot<TData = unknown>(options: UsePivotOptions<TData>) {
   })
   
   const [draftState, setDraftState] = useState<PivotState>(pivotState)
+  const [availableOrder, setAvailableOrder] = useState<string[]>(initialAvailableOrder)
   const [isDirty, setIsDirty] = useState(false)
+
+  const getColumnById = useCallback((columnId: string) => {
+    return columns.find((column) => column.id === columnId)
+  }, [columns])
+
+  const reorderList = useCallback(<TItem extends { id: string }>(items: TItem[], fromId: string, toId: string) => {
+    const fromIndex = items.findIndex((item) => item.id === fromId)
+    const toIndex = items.findIndex((item) => item.id === toId)
+
+    if (fromIndex === -1 || toIndex === -1 || fromIndex === toIndex) {
+      return items
+    }
+
+    const next = [...items]
+    const [moved] = next.splice(fromIndex, 1)
+    next.splice(toIndex, 0, moved)
+    return next
+  }, [])
   
   // Available fields that can be used in pivot
   const availableFields = useMemo(() => {
-    return columns.filter(col => {
-      // Field is available if not already used
-      const isUsedAsRowGroup = draftState.rowGroups.some(rg => rg.id === col.id)
-      const isUsedAsColumnGroup = draftState.columnGroups.some(cg => cg.id === col.id)
-      const isUsedAsValue = draftState.values.some(v => v.id === col.id)
-      const isUsedAsFilter = draftState.filters.some(f => f.id === col.id)
-      
-      return !isUsedAsRowGroup && !isUsedAsColumnGroup && !isUsedAsValue && !isUsedAsFilter
-    })
-  }, [columns, draftState])
+    const columnMap = new Map(columns.map((column) => [column.id, column]))
+    const orderedIds = [
+      ...availableOrder,
+      ...columns.map((column) => column.id).filter((id) => !availableOrder.includes(id)),
+    ]
+
+    return orderedIds
+      .map((id) => columnMap.get(id))
+      .filter((column): column is ColumnConfig<TData> => Boolean(column))
+      .filter((column) => {
+        const isUsedAsRowGroup = draftState.rowGroups.some((rowGroup) => rowGroup.id === column.id)
+        const isUsedAsColumnGroup = draftState.columnGroups.some((columnGroup) => columnGroup.id === column.id)
+        const isUsedAsValue = draftState.values.some((value) => value.id === column.id)
+
+        return !isUsedAsRowGroup && !isUsedAsColumnGroup && !isUsedAsValue
+      })
+  }, [availableOrder, columns, draftState])
   
   // Fields that can be grouped (non-numeric typically)
   const groupableFields = useMemo(() => {
@@ -52,7 +89,9 @@ export function usePivot<TData = unknown>(options: UsePivotOptions<TData>) {
   
   // Add to row groups
   const addRowGroup = useCallback((columnId: string) => {
-    const col = columns.find(c => c.id === columnId)
+    if (draftState.rowGroups.some((rowGroup) => rowGroup.id === columnId)) return
+
+    const col = getColumnById(columnId)
     if (!col || !col.accessorKey) return
     
     const rowGroupCol: RowGroupCol = {
@@ -66,7 +105,7 @@ export function usePivot<TData = unknown>(options: UsePivotOptions<TData>) {
       rowGroups: [...prev.rowGroups, rowGroupCol],
     }))
     setIsDirty(true)
-  }, [columns])
+  }, [draftState.rowGroups, getColumnById])
   
   // Remove from row groups
   const removeRowGroup = useCallback((columnId: string) => {
@@ -90,7 +129,9 @@ export function usePivot<TData = unknown>(options: UsePivotOptions<TData>) {
   
   // Add to column groups (pivot columns)
   const addColumnGroup = useCallback((columnId: string) => {
-    const col = columns.find(c => c.id === columnId)
+    if (draftState.columnGroups.some((columnGroup) => columnGroup.id === columnId)) return
+
+    const col = getColumnById(columnId)
     if (!col || !col.accessorKey) return
     
     const pivotCol: PivotCol = {
@@ -103,7 +144,7 @@ export function usePivot<TData = unknown>(options: UsePivotOptions<TData>) {
       columnGroups: [...prev.columnGroups, pivotCol],
     }))
     setIsDirty(true)
-  }, [columns])
+  }, [draftState.columnGroups, getColumnById])
   
   // Remove from column groups
   const removeColumnGroup = useCallback((columnId: string) => {
@@ -116,7 +157,9 @@ export function usePivot<TData = unknown>(options: UsePivotOptions<TData>) {
   
   // Add to values
   const addValue = useCallback((columnId: string, aggFunc: AggregationFn = "sum") => {
-    const col = columns.find(c => c.id === columnId)
+    if (draftState.values.some((value) => value.id === columnId)) return
+
+    const col = getColumnById(columnId)
     if (!col || !col.accessorKey) return
     
     const valueCol: ValueCol = {
@@ -130,7 +173,7 @@ export function usePivot<TData = unknown>(options: UsePivotOptions<TData>) {
       values: [...prev.values, valueCol],
     }))
     setIsDirty(true)
-  }, [columns])
+  }, [draftState.values, getColumnById])
   
   // Remove from values
   const removeValue = useCallback((columnId: string) => {
@@ -154,7 +197,9 @@ export function usePivot<TData = unknown>(options: UsePivotOptions<TData>) {
   
   // Add filter
   const addFilter = useCallback((columnId: string) => {
-    const col = columns.find(c => c.id === columnId)
+    if (draftState.filters.some((filter) => filter.id === columnId)) return
+
+    const col = getColumnById(columnId)
     if (!col || !col.accessorKey) return
     
     setDraftState(prev => ({
@@ -170,7 +215,41 @@ export function usePivot<TData = unknown>(options: UsePivotOptions<TData>) {
       }],
     }))
     setIsDirty(true)
+  }, [draftState.filters, getColumnById])
+
+  const reorderAvailable = useCallback((fromId: string, toId: string) => {
+    setAvailableOrder((prev) => {
+      const order = prev.length > 0 ? prev : columns.map((column) => column.id)
+      const fromIndex = order.indexOf(fromId)
+      const toIndex = order.indexOf(toId)
+
+      if (fromIndex === -1 || toIndex === -1 || fromIndex === toIndex) {
+        return order
+      }
+
+      const next = [...order]
+      const [moved] = next.splice(fromIndex, 1)
+      next.splice(toIndex, 0, moved)
+      return next
+    })
+    setIsDirty(true)
   }, [columns])
+
+  const reorderZone = useCallback((zone: "rowGroups" | "columnGroups" | "values" | "filters", fromId: string, toId: string) => {
+    setDraftState((prev) => {
+      switch (zone) {
+        case "rowGroups":
+          return { ...prev, rowGroups: reorderList(prev.rowGroups, fromId, toId) }
+        case "columnGroups":
+          return { ...prev, columnGroups: reorderList(prev.columnGroups, fromId, toId) }
+        case "values":
+          return { ...prev, values: reorderList(prev.values, fromId, toId) }
+        case "filters":
+          return { ...prev, filters: reorderList(prev.filters, fromId, toId) }
+      }
+    })
+    setIsDirty(true)
+  }, [reorderList])
   
   // Remove filter
   const removeFilter = useCallback((columnId: string) => {
@@ -188,24 +267,44 @@ export function usePivot<TData = unknown>(options: UsePivotOptions<TData>) {
     toZone: "available" | "rowGroups" | "columnGroups" | "values" | "filters"
   ) => {
     if (fromZone === toZone) return
-    
-    // Remove from source zone
-    switch (fromZone) {
-      case "rowGroups":
-        removeRowGroup(columnId)
-        break
-      case "columnGroups":
-        removeColumnGroup(columnId)
-        break
-      case "values":
-        removeValue(columnId)
-        break
-      case "filters":
-        removeFilter(columnId)
-        break
+
+    if (toZone === "available") {
+      switch (fromZone) {
+        case "rowGroups":
+          removeRowGroup(columnId)
+          break
+        case "columnGroups":
+          removeColumnGroup(columnId)
+          break
+        case "values":
+          removeValue(columnId)
+          break
+        case "filters":
+          removeFilter(columnId)
+          break
+      }
+      return
     }
-    
-    // Add to target zone
+
+    if (toZone === "filters") {
+      addFilter(columnId)
+      return
+    }
+
+    if (fromZone !== "available" && fromZone !== "filters") {
+      switch (fromZone) {
+        case "rowGroups":
+          removeRowGroup(columnId)
+          break
+        case "columnGroups":
+          removeColumnGroup(columnId)
+          break
+        case "values":
+          removeValue(columnId)
+          break
+      }
+    }
+
     switch (toZone) {
       case "rowGroups":
         addRowGroup(columnId)
@@ -226,14 +325,14 @@ export function usePivot<TData = unknown>(options: UsePivotOptions<TData>) {
   const apply = useCallback(() => {
     setPivotState(draftState)
     setIsDirty(false)
-    onApply?.(draftState)
-  }, [draftState, onApply])
+    onApply?.({ pivotState: draftState, availableOrder })
+  }, [draftState, availableOrder, onApply])
   
-  // Reset to last applied state
+  // Reset draft state to an empty configuration so apply can re-run SSRM.
   const reset = useCallback(() => {
-    setDraftState(pivotState)
-    setIsDirty(false)
-  }, [pivotState])
+    setDraftState(emptyPivotState)
+    setIsDirty(true)
+  }, [])
   
   // Clear all
   const clear = useCallback(() => {
@@ -272,6 +371,8 @@ export function usePivot<TData = unknown>(options: UsePivotOptions<TData>) {
     
     // General actions
     moveField,
+    reorderAvailable,
+    reorderZone,
     apply,
     reset,
     clear,

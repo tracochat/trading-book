@@ -31,6 +31,7 @@ export function DataGridHeaderCell<TData>({
   
   const canSort = column.enableSorting !== false
   const canFilter = column.enableFiltering !== false && column.filterConfig
+  const showFilterControl = Boolean(canFilter)
   
   return (
     <div
@@ -80,37 +81,36 @@ export function DataGridHeaderCell<TData>({
         )}
       </div>
       
-      {/* Filter active indicator (always visible when filtered) */}
-      {isFiltered && !isHovered && (
-        <span 
-          className="size-1.5 rounded-full bg-primary shrink-0"
-          aria-label="Filter active"
-        />
-      )}
-      
-      {/* Filter button (visible on hover or when filter open) */}
-      {canFilter && (isHovered || isFilterOpen) && (
-        <DataGridFilterPopover
-          column={column}
-          isOpen={isFilterOpen}
-          onOpenChange={setIsFilterOpen}
-          onApply={onFilter}
-          onClear={onClearFilter}
-          currentValue={currentFilterValue}
-        >
-          <Button
-            variant="ghost"
-            size="icon"
-            className={cn(
-              "size-6 shrink-0 transition-opacity",
-              isFiltered && "text-primary"
-            )}
-            aria-label={`Filter ${column.header}`}
+      <div className="flex w-6 shrink-0 items-center justify-center">
+        {showFilterControl ? (
+          <DataGridFilterPopover
+            column={column}
+            isOpen={isFilterOpen}
+            onOpenChange={setIsFilterOpen}
+            onApply={onFilter}
+            onClear={onClearFilter}
+            currentValue={currentFilterValue}
           >
-            <MoreVertical className="size-3.5" />
-          </Button>
-        </DataGridFilterPopover>
-      )}
+            <Button
+              variant="ghost"
+              size="icon"
+              className={cn(
+                "size-6 transition-opacity",
+                (isHovered || isFilterOpen || isFiltered) ? "opacity-100" : "opacity-0 pointer-events-none",
+                isFiltered && "text-primary"
+              )}
+              aria-label={`Filter ${column.header}`}
+            >
+              <MoreVertical className="size-3.5" />
+            </Button>
+          </DataGridFilterPopover>
+        ) : isFiltered ? (
+          <span 
+            className="size-1.5 rounded-full bg-primary"
+            aria-label="Filter active"
+          />
+        ) : null}
+      </div>
       
       {/* Screen reader text for sort state */}
       {sortDirection && (

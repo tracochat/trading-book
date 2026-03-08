@@ -12,7 +12,6 @@ import {
   type DragEndEvent,
   type DragStartEvent,
   useDroppable,
-  useDraggable,
 } from "@dnd-kit/core"
 import {
   SortableContext,
@@ -42,7 +41,9 @@ import type { ColumnConfig, AggregationFn } from "./types"
 
 interface DataGridPivotPanelProps<TData> {
   columns: ColumnConfig<TData>[]
-  onApply: (state: ReturnType<typeof usePivot>["pivotState"]) => void
+  onApply: (args: { pivotState: ReturnType<typeof usePivot>["pivotState"]
+    availableOrder: string[]
+  }) => void
   onClose: () => void
 }
 
@@ -71,9 +72,8 @@ export function DataGridPivotPanel<TData>({
   )
   
   const handleDragStart = (event: DragStartEvent) => {
-    setActiveId(event.active.id as string)
-    // Determine source zone from the data
     const data = event.active.data.current
+    setActiveId(data?.columnId || null)
     setActiveZone(data?.zone || "available")
   }
   
@@ -91,10 +91,34 @@ export function DataGridPivotPanel<TData>({
     
     const sourceZone = activeData?.zone || "available"
     const targetZone = overData?.zone || over.id
+    const columnId = activeData?.columnId as string | undefined
+    const targetColumnId = overData?.columnId as string | undefined
+
+    if (!columnId || typeof targetZone !== "string") {
+      setActiveId(null)
+      setActiveZone(null)
+      return
+    }
+
+    if (sourceZone === targetZone && targetColumnId && columnId !== targetColumnId) {
+      if (targetZone === "available") {
+        pivot.reorderAvailable(columnId, targetColumnId)
+      } else {
+        pivot.reorderZone(
+          targetZone as "rowGroups" | "columnGroups" | "values" | "filters",
+          columnId,
+          targetColumnId
+        )
+      }
+
+      setActiveId(null)
+      setActiveZone(null)
+      return
+    }
     
-    if (sourceZone !== targetZone && typeof active.id === "string") {
+    if (sourceZone !== targetZone) {
       pivot.moveField(
-        active.id,
+        columnId,
         sourceZone as "available" | "rowGroups" | "columnGroups" | "values" | "filters",
         targetZone as "available" | "rowGroups" | "columnGroups" | "values" | "filters"
       )
@@ -135,14 +159,20 @@ export function DataGridPivotPanel<TData>({
               defaultOpen
             >
               <DroppableZone zone="available">
-                {pivot.availableFields.map((col) => (
-                  <DraggableField
-                    key={col.id}
-                    id={col.id}
-                    label={col.header}
-                    zone="available"
-                  />
-                ))}
+                <SortableContext
+                  items={pivot.availableFields.map((col) => `available:${col.id}`)}
+                  strategy={verticalListSortingStrategy}
+                >
+                  {pivot.availableFields.map((col) => (
+                    <SortableField
+                      key={col.id}
+                      id={`available:${col.id}`}
+                      columnId={col.id}
+                      label={col.header}
+                      zone="available"
+                    />
+                  ))}
+                </SortableContext>
                 {pivot.availableFields.length === 0 && (
                   <p className="text-xs text-muted-foreground py-2">
                     All fields are in use
@@ -160,13 +190,14 @@ export function DataGridPivotPanel<TData>({
             >
               <DroppableZone zone="rowGroups" isEmpty={pivot.draftState.rowGroups.length === 0}>
                 <SortableContext
-                  items={pivot.draftState.rowGroups.map(rg => rg.id)}
+                  items={pivot.draftState.rowGroups.map((rg) => `rowGroups:${rg.id}`)}
                   strategy={verticalListSortingStrategy}
                 >
                   {pivot.draftState.rowGroups.map((rg) => (
                     <SortableField
                       key={rg.id}
-                      id={rg.id}
+                      id={`rowGroups:${rg.id}`}
+                      columnId={rg.id}
                       label={rg.displayName}
                       zone="rowGroups"
                       onRemove={() => pivot.removeRowGroup(rg.id)}
@@ -183,18 +214,24 @@ export function DataGridPivotPanel<TData>({
               count={pivot.draftState.columnGroups.length}
             >
               <DroppableZone zone="columnGroups" isEmpty={pivot.draftState.columnGroups.length === 0}>
-                {pivot.draftState.columnGroups.map((cg) => {
-                  const col = columns.find(c => c.id === cg.id)
-                  return (
-                    <DraggableField
-                      key={cg.id}
-                      id={cg.id}
-                      label={col?.header || cg.id}
-                      zone="columnGroups"
-                      onRemove={() => pivot.removeColumnGroup(cg.id)}
-                    />
-                  )
-                })}
+                <SortableContext
+                  items={pivot.draftState.columnGroups.map((cg) => `columnGroups:${cg.id}`)}
+                  strategy={verticalListSortingStrategy}
+                >
+                  {pivot.draftState.columnGroups.map((cg) => {
+                    const col = columns.find(c => c.id === cg.id)
+                    return (
+                      <SortableField
+                        key={cg.id}
+                        id={`columnGroups:${cg.id}`}
+                        columnId={cg.id}
+                        label={col?.header || cg.id}
+                        zone="columnGroups"
+                        onRemove={() => pivot.removeColumnGroup(cg.id)}
+                      />
+                    )
+                  })}
+                </SortableContext>
               </DroppableZone>
             </PivotSection>
             
@@ -206,19 +243,25 @@ export function DataGridPivotPanel<TData>({
               defaultOpen
             >
               <DroppableZone zone="values" isEmpty={pivot.draftState.values.length === 0}>
-                {pivot.draftState.values.map((v) => {
-                  const col = columns.find(c => c.id === v.id)
-                  return (
-                    <ValueField
-                      key={v.id}
-                      id={v.id}
-                      label={col?.header || v.id}
-                      aggFunc={v.aggFunc}
-                      onAggFuncChange={(fn) => pivot.updateValueAggFunc(v.id, fn)}
-                      onRemove={() => pivot.removeValue(v.id)}
-                    />
-                  )
-                })}
+                <SortableContext
+                  items={pivot.draftState.values.map((value) => `values:${value.id}`)}
+                  strategy={verticalListSortingStrategy}
+                >
+                  {pivot.draftState.values.map((v) => {
+                    const col = columns.find(c => c.id === v.id)
+                    return (
+                      <ValueField
+                        key={v.id}
+                        id={`values:${v.id}`}
+                        columnId={v.id}
+                        label={col?.header || v.id}
+                        aggFunc={v.aggFunc}
+                        onAggFuncChange={(fn) => pivot.updateValueAggFunc(v.id, fn)}
+                        onRemove={() => pivot.removeValue(v.id)}
+                      />
+                    )
+                  })}
+                </SortableContext>
               </DroppableZone>
             </PivotSection>
             
@@ -229,18 +272,24 @@ export function DataGridPivotPanel<TData>({
               count={pivot.draftState.filters.length}
             >
               <DroppableZone zone="filters" isEmpty={pivot.draftState.filters.length === 0}>
-                {pivot.draftState.filters.map((f) => {
-                  const col = columns.find(c => c.id === f.id)
-                  return (
-                    <DraggableField
-                      key={f.id}
-                      id={f.id}
-                      label={col?.header || f.id}
-                      zone="filters"
-                      onRemove={() => pivot.removeFilter(f.id)}
-                    />
-                  )
-                })}
+                <SortableContext
+                  items={pivot.draftState.filters.map((filter) => `filters:${filter.id}`)}
+                  strategy={verticalListSortingStrategy}
+                >
+                  {pivot.draftState.filters.map((f) => {
+                    const col = columns.find(c => c.id === f.id)
+                    return (
+                      <SortableField
+                        key={f.id}
+                        id={`filters:${f.id}`}
+                        columnId={f.id}
+                        label={col?.header || f.id}
+                        zone="filters"
+                        onRemove={() => pivot.removeFilter(f.id)}
+                      />
+                    )
+                  })}
+                </SortableContext>
               </DroppableZone>
             </PivotSection>
           </div>
@@ -264,7 +313,6 @@ export function DataGridPivotPanel<TData>({
           size="sm"
           className="flex-1"
           onClick={pivot.reset}
-          disabled={!pivot.isDirty}
         >
           Reset
         </Button>
@@ -340,23 +388,32 @@ function DroppableZone({ zone, isEmpty, children }: DroppableZoneProps) {
   )
 }
 
-// Draggable field
-interface DraggableFieldProps {
+// Sortable field
+interface SortableFieldProps {
   id: string
+  columnId: string
   label: string
   zone: string
   onRemove?: () => void
 }
 
-function DraggableField({ id, label, zone, onRemove }: DraggableFieldProps) {
-  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
+function SortableField({ id, columnId, label, zone, onRemove }: SortableFieldProps) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({
     id,
-    data: { zone },
+    data: { zone, columnId },
   })
   
-  const style = transform ? {
-    transform: CSS.Translate.toString(transform),
-  } : undefined
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+  }
   
   return (
     <div
@@ -390,15 +447,17 @@ function DraggableField({ id, label, zone, onRemove }: DraggableFieldProps) {
   )
 }
 
-// Sortable field (for row groups)
-interface SortableFieldProps {
+// Value field with aggregation selector
+interface ValueFieldProps {
   id: string
+  columnId: string
   label: string
-  zone: string
+  aggFunc: AggregationFn
+  onAggFuncChange: (fn: AggregationFn) => void
   onRemove: () => void
 }
 
-function SortableField({ id, label, zone, onRemove }: SortableFieldProps) {
+function ValueField({ id, columnId, label, aggFunc, onAggFuncChange, onRemove }: ValueFieldProps) {
   const {
     attributes,
     listeners,
@@ -408,62 +467,13 @@ function SortableField({ id, label, zone, onRemove }: SortableFieldProps) {
     isDragging,
   } = useSortable({
     id,
-    data: { zone },
+    data: { zone: "values", columnId },
   })
   
   const style = {
     transform: CSS.Transform.toString(transform),
     transition,
   }
-  
-  return (
-    <div
-      ref={setNodeRef}
-      style={style}
-      className={cn(
-        "flex items-center gap-2 px-2 py-1.5 bg-muted/50 rounded-md text-sm group",
-        isDragging && "opacity-50"
-      )}
-    >
-      <button
-        className="cursor-grab active:cursor-grabbing touch-none"
-        {...listeners}
-        {...attributes}
-      >
-        <GripVertical className="size-3.5 text-muted-foreground" />
-      </button>
-      <span className="flex-1 truncate">{label}</span>
-      <Button
-        variant="ghost"
-        size="icon"
-        className="size-5 opacity-0 group-hover:opacity-100"
-        onClick={onRemove}
-      >
-        <X className="size-3" />
-        <span className="sr-only">Remove</span>
-      </Button>
-    </div>
-  )
-}
-
-// Value field with aggregation selector
-interface ValueFieldProps {
-  id: string
-  label: string
-  aggFunc: AggregationFn
-  onAggFuncChange: (fn: AggregationFn) => void
-  onRemove: () => void
-}
-
-function ValueField({ id, label, aggFunc, onAggFuncChange, onRemove }: ValueFieldProps) {
-  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
-    id,
-    data: { zone: "values" },
-  })
-  
-  const style = transform ? {
-    transform: CSS.Translate.toString(transform),
-  } : undefined
   
   return (
     <div

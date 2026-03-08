@@ -75,6 +75,12 @@ export function DataGridToolbar<TData>({ columns, toolbar }: DataGridToolbarProp
   return (
     <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
       <div className="flex flex-1 flex-col gap-4 lg:flex-row lg:items-center">
+        {toolbar?.titleBadge && (
+          <div className="shrink-0">
+            {toolbar.titleBadge}
+          </div>
+        )}
+
         {/* Global search */}
         {showSearch && (
           <div className="relative flex-1 max-w-sm">

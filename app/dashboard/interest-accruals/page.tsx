@@ -18,10 +18,32 @@ async function getInterestAccruals() {
     .select({ accrual: interestAccruals, account: accounts })
     .from(interestAccruals)
     .leftJoin(accounts, sql`${accounts.id} = ${interestAccruals.account_id}`)
-    .orderBy(interestAccruals.accrual_date, 'desc')
+    .orderBy(sql`${interestAccruals.accrual_date} desc`)
     .limit(200)
 
   return rows.map(r => ({ ...r.accrual, account: r.account }))
+}
+
+function normalizeCurrencyCode(currency: string | null | undefined) {
+  const normalized = (currency || '').trim().toUpperCase()
+  return /^[A-Z]{3}$/.test(normalized) ? normalized : null
+}
+
+function formatCurrencyAmount(amount: number, currency: string | null | undefined) {
+  const normalizedCurrency = normalizeCurrencyCode(currency)
+
+  if (!normalizedCurrency) {
+    return new Intl.NumberFormat('en-US', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(amount)
+  }
+
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: normalizedCurrency,
+    minimumFractionDigits: 2,
+  }).format(amount)
 }
 
 export default async function InterestAccrualsPage() {
@@ -36,14 +58,6 @@ export default async function InterestAccrualsPage() {
     totalsByCurrency[a.currency].accrued += Number(a.interest_accrued) || 0
     totalsByCurrency[a.currency].ending += Number(a.ending_accrual_balance) || 0
   })
-
-  const formatCurrency = (amount: number, currency: string) => {
-    return new Intl.NumberFormat('en-US', { 
-      style: 'currency', 
-      currency: currency,
-      minimumFractionDigits: 2,
-    }).format(amount)
-  }
 
   return (
     <div className="space-y-6">
@@ -63,9 +77,9 @@ export default async function InterestAccrualsPage() {
               <Percent className="size-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">{formatCurrency(totals.accrued, currency)}</div>
+              <div className="text-2xl font-bold">{formatCurrencyAmount(totals.accrued, currency)}</div>
               <p className="text-xs text-muted-foreground">
-                Ending balance: {formatCurrency(totals.ending, currency)}
+                Ending balance: {formatCurrencyAmount(totals.ending, currency)}
               </p>
             </CardContent>
           </Card>
@@ -120,15 +134,15 @@ export default async function InterestAccrualsPage() {
                       ) : '-'}
                     </TableCell>
                     <TableCell className="text-right">
-                      {formatCurrency(accrual.starting_accrual_balance || 0, accrual.currency)}
+                      {formatCurrencyAmount(accrual.starting_accrual_balance || 0, accrual.currency)}
                     </TableCell>
                     <TableCell className="text-right">
                       <span className={accrual.interest_accrued >= 0 ? 'text-green-600' : 'text-red-600'}>
-                        {formatCurrency(accrual.interest_accrued, accrual.currency)}
+                        {formatCurrencyAmount(accrual.interest_accrued, accrual.currency)}
                       </span>
                     </TableCell>
                     <TableCell className="text-right font-medium">
-                      {formatCurrency(accrual.ending_accrual_balance, accrual.currency)}
+                      {formatCurrencyAmount(accrual.ending_accrual_balance, accrual.currency)}
                     </TableCell>
                   </TableRow>
                 ))}

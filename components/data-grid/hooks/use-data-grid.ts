@@ -1,6 +1,6 @@
 "use client"
 
-import { createContext, useContext, useState, useCallback, useMemo, useEffect, useRef } from "react"
+import { createContext, createElement, useContext, useState, useCallback, useMemo, useEffect, useRef } from "react"
 import type { SortingState, ColumnFiltersState, VisibilityState } from "@tanstack/react-table"
 import type {
   DataGridConfig,
@@ -14,6 +14,7 @@ import type {
   FilterModel,
   SortItem,
 } from "../types"
+import { flattenGroupedData } from "../utils"
 
 // Default values
 const defaultPivotState: PivotState = {
@@ -85,12 +86,18 @@ export function DataGridProvider<TData>({ config, children }: DataGridProviderPr
   const [pivotState, setPivotState] = useState<PivotState>(defaultPivotState)
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set())
   
+  // Column ordering state (to support pivot-driven reordering)
+  const [columnOrder, setColumnOrder] = useState<string[]>(
+    () => config.columns.map((c) => c.id)
+  )
+  
   // Server-side state
-  const [isLoading, setIsLoading] = useState(false)
+  const [isLoading, setIsLoading] = useState(config.dataSource.type === "server")
   const [error, setError] = useState<Error | null>(null)
   const [totalRows, setTotalRows] = useState(0)
   const [serverData, setServerData] = useState<TData[]>([])
   const [groupedData, setGroupedData] = useState<GroupedRow<TData>[]>()
+  const [metadata, setMetadata] = useState<Record<string, any>>({})
   
   // Debounce ref
   const debounceRef = useRef<NodeJS.Timeout>()
@@ -209,6 +216,10 @@ export function DataGridProvider<TData>({ config, children }: DataGridProviderPr
       setServerData(data.rowData)
       setTotalRows(data.rowCount)
       setGroupedData(data.groupedData)
+      setMetadata({
+        ...(data.metadata || {}),
+        pivotResultCols: data.pivotResultCols || [],
+      })
     } catch (err) {
       setError(err instanceof Error ? err : new Error("Unknown error"))
     } finally {
@@ -244,6 +255,10 @@ export function DataGridProvider<TData>({ config, children }: DataGridProviderPr
       }
     }
   }, [debouncedFetch, config.dataSource.type])
+
+  useEffect(() => {
+    setPageIndex(0)
+  }, [sorting, columnFilters, globalFilter, pivotState])
   
   // Actions
   const actions: DataGridActions<TData> = useMemo(() => ({
@@ -259,6 +274,22 @@ export function DataGridProvider<TData>({ config, children }: DataGridProviderPr
     },
     togglePivotPanel: () => setPivotPanelOpen(prev => !prev),
     setPivotState,
+    setColumnOrder: (order: string[]) => {
+      setColumnOrder(order)
+    },
+    reorderColumns: (fromId: string, toId: string) => {
+      setColumnOrder((prev) => {
+        const fromIndex = prev.indexOf(fromId)
+        const toIndex = prev.indexOf(toId)
+        if (fromIndex === -1 || toIndex === -1 || fromIndex === toIndex) {
+          return prev
+        }
+        const next = [...prev]
+        const [moved] = next.splice(fromIndex, 1)
+        next.splice(toIndex, 0, moved)
+        return next
+      })
+    },
     toggleGroup: (groupKey: string) => {
       setExpandedGroups(prev => {
         const next = new Set(prev)
@@ -291,6 +322,7 @@ export function DataGridProvider<TData>({ config, children }: DataGridProviderPr
     totalRows,
     pivotPanelOpen,
     pivotState,
+    columnOrder,
     expandedGroups,
   }), [
     sorting,
@@ -305,6 +337,7 @@ export function DataGridProvider<TData>({ config, children }: DataGridProviderPr
     totalRows,
     pivotPanelOpen,
     pivotState,
+    columnOrder,
     expandedGroups,
   ])
   
@@ -323,19 +356,21 @@ export function DataGridProvider<TData>({ config, children }: DataGridProviderPr
     actions,
     data,
     groupedData,
-  }), [config, state, actions, data, groupedData])
+    metadata,
+  }), [config, state, actions, data, groupedData, metadata])
   
-  return (
-    <DataGridContext.Provider value={contextValue as DataGridContextValue<unknown>}>
-      {children}
-    </DataGridContext.Provider>
+  return createElement(
+    DataGridContext.Provider,
+    { value: contextValue as DataGridContextValue<unknown> },
+    children
   )
 }
 
 // Hook to use data grid with TanStack Table
 export function useDataGrid<TData>() {
   const context = useDataGridContext<TData>()
-  const { config, state, actions, data } = context
+  // include metadata from context so we can use it below without causing a ReferenceError
+  const { config, state, actions, data, groupedData, metadata } = context
   
   // Client-side filtering
   const filteredData = useMemo(() => {
@@ -422,11 +457,22 @@ export function useDataGrid<TData>() {
   const totalCount = config.dataSource.type === "server" 
     ? state.totalRows 
     : sortedData.length
+
+  const flattenedGroupedData = useMemo(() => {
+    if (!groupedData || groupedData.length === 0) {
+      return []
+    }
+    return flattenGroupedData(groupedData, state.expandedGroups)
+  }, [groupedData, state.expandedGroups])
   
+  // return an augmented context — metadata is already included in `context`,
+  // so we dont need to redeclare it separately. Keeping it here is harmless but
+  // referencing the variable ensures it's defined.
   return {
     ...context,
     processedData: paginatedData,
     totalCount,
+    flattenedGroupedData,
   }
 }
 

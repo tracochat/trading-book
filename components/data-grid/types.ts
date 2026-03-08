@@ -171,11 +171,19 @@ export interface SSRMResponse<TData = unknown> {
   rowData: TData[]
   rowCount: number
   groupedData?: GroupedRow<TData>[]
+  /**
+   * When the server pivots values into columns, the generated column IDs will
+   * be listed here (in order).  IDs use `valueId::pivotValue` syntax.
+   */
   pivotResultCols?: string[]
   metadata?: {
     queryTime?: number
     cached?: boolean
     totals?: Record<string, number>
+    /**
+     * Values emitted for each pivot column (id -> array of distinct values).
+     */
+    pivotValues?: Record<string, string[]>
   }
 }
 
@@ -289,6 +297,7 @@ export interface ToolbarConfig {
   showSearch?: boolean
   showColumnToggle?: boolean
   showPivotToggle?: boolean
+  titleBadge?: ReactNode
   customActions?: ReactNode
   filters?: ToolbarFilterConfig[]
 }
@@ -337,6 +346,9 @@ export interface DataGridState<TData = unknown> {
   pivotPanelOpen: boolean
   pivotState: PivotState
   
+  // Column ordering (ids in display sequence)
+  columnOrder: string[]
+  
   // Group states
   expandedGroups: Set<string>
 }
@@ -355,6 +367,16 @@ export interface DataGridActions<TData = unknown> {
   setPageSize: (size: number) => void
   togglePivotPanel: () => void
   setPivotState: (state: PivotState) => void
+  /**
+   * Reorder the visible column sequence. Takes an array of column IDs
+   * representing the desired order, typically coming from the pivot panel's
+   * available-field ordering.
+   */
+  setColumnOrder: (order: string[]) => void
+  /**
+   * Convenience helper to move a column id before another.
+   */
+  reorderColumns: (fromId: string, toId: string) => void
   toggleGroup: (groupKey: string) => void
   refresh: () => void
 }
@@ -369,4 +391,5 @@ export interface DataGridContextValue<TData = unknown> {
   actions: DataGridActions<TData>
   data: TData[]
   groupedData?: GroupedRow<TData>[]
+  metadata?: Record<string, any>
 }
